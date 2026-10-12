@@ -258,23 +258,32 @@ let token = localStorage.getItem('bot_token') || '';
 let remoteApiUrl = localStorage.getItem('bot_remote_url') || '';
 let remoteApiToken = localStorage.getItem('bot_remote_token') || '';
 
-// Determine API base: if remote configured and we're on Vercel, use remote; else use local ''
-function getApiBase() {
-  const isVercel = window.location.hostname.endsWith('.vercel.app');
-  if (isVercel && remoteApiUrl) return remoteApiUrl.replace(/\/$/, '') + '/api';
-  return '/api';
+// Determine if we need to use the Vercel proxy (HTTPS page → HTTP VPS)
+function isVercelHost() {
+  return window.location.hostname.endsWith('.vercel.app');
 }
 
 async function api(method, path, body) {
-  const url = getApiBase() + path;
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  // Use remote token for Vercel→VPS, or local password for localhost
-  if (remoteApiToken && window.location.hostname.endsWith('.vercel.app')) {
-    opts.headers['X-API-Token'] = remoteApiToken;
-  } else if (token) {
-    opts.headers['Authorization'] = `Bearer ${token}`;
+  let url;
+
+  if (isVercelHost() && remoteApiUrl) {
+    // Route through Vercel serverless proxy to avoid Mixed Content
+    url = '/api/proxy';
+    opts.method = 'POST';
+    opts.body = JSON.stringify({
+      vpsUrl: remoteApiUrl,
+      apiToken: remoteApiToken,
+      path: '/api' + path,
+      method: method,
+      body: body || null
+    });
+  } else {
+    url = '/api' + path;
+    if (token) opts.headers['Authorization'] = `Bearer ${token}`;
+    if (body) opts.body = JSON.stringify(body);
   }
-  if (body) opts.body = JSON.stringify(body);
+
   try {
     const res = await fetch(url, opts);
     return res.json();
@@ -300,15 +309,19 @@ async function doRemoteSetup() {
   if (!url || !tok) { el.innerHTML = '<span style="color:#e74c3c">Preencha URL e Token</span>'; return; }
   el.innerHTML = '<span style="color:#888">Testando conexão com VPS...</span>';
   try {
-    const healthRes = await fetch(url.replace(/\/$/, '') + '/api/health', { headers: { 'X-API-Token': tok } });
-    const health = await healthRes.json();
+    // Use Vercel proxy to avoid Mixed Content (HTTPS page → HTTP VPS)
+    const proxyCall = async (apiPath, method, body) => {
+      const res = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vpsUrl: url, apiToken: tok, path: apiPath, method: method || 'GET', body: body || null })
+      });
+      return res.json();
+    };
+    const health = await proxyCall('/api/health');
     if (!health.ok) { el.innerHTML = '<span style="color:#e74c3c">❌ Token inválido ou VPS inacessível</span>'; return; }
-    // Test login
-    const loginRes = await fetch(url.replace(/\/$/, '') + '/api/login', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Token': tok },
-      body: JSON.stringify({ password: pw })
-    });
-    const loginData = await loginRes.json();
+    // Test login via proxy
+    const loginData = await proxyCall('/api/login', 'POST', { password: pw });
     if (!loginData.success) { el.innerHTML = '<span style="color:#e74c3c">❌ Senha incorreta</span>'; return; }
     // Save config
     remoteApiUrl = url;
@@ -514,7 +527,11 @@ async function loadStatus() {
   } else if (s.status === 'qr_pending' && s.qrCode) {
     badge.className = 'status-badge status-qr';
     badge.textContent = 'Aguardando QR Code';
-    container.innerHTML = `<p style="margin-bottom:15px;color:#888;">Escaneie com seu WhatsApp:</p><img src="${getApiBase().replace('/api','')}/qr-image?t=${Date.now()}" alt="QR Code" style="border-radius:12px;background:#fff;padding:10px;">`;
+    // Use proxy for QR image to avoid Mixed Content
+    const qrSrc = isVercelHost() && remoteApiUrl
+      ? `/api/proxy?vpsUrl=${encodeURIComponent(remoteApiUrl)}&apiToken=${encodeURIComponent(remoteApiToken)}&path=/api/qr-image&t=${Date.now()}`
+      : `/api/qr-image?t=${Date.now()}`;
+    container.innerHTML = `<p style="margin-bottom:15px;color:#888;">Escaneie com seu WhatsApp:</p><img src="${qrSrc}" alt="QR Code" style="border-radius:12px;background:#fff;padding:10px;">`;
   } else {
     badge.className = 'status-badge status-disconnected';
     badge.textContent = 'Desconectado';
