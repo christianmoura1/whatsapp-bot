@@ -3,7 +3,42 @@ import fs from 'fs';
 import path from 'path';
 import https from 'https';
 import http from 'http';
+import { execFile } from 'child_process';
 import { getSetting } from './db';
+
+// Locate ffmpeg binary (bundled in tools/ or system PATH)
+function getFfmpegPath(): string {
+  const bundled = path.join(__dirname, '..', 'tools', 'ffmpeg-9.0.2-essentials_build', 'bin', 'ffmpeg.exe');
+  if (fs.existsSync(bundled)) return bundled;
+  return 'ffmpeg'; // fall back to system PATH
+}
+
+/**
+ * Convert an MP3 file to OGG/Opus (WhatsApp-compatible PTT format) using ffmpeg.
+ * Returns the path to the generated .ogg file.
+ */
+export async function convertMp3ToOgg(mp3Path: string): Promise<string> {
+  const oggPath = mp3Path.replace(/\.mp3$/i, '.ogg');
+  const ffmpeg = getFfmpegPath();
+  return new Promise<string>((resolve, reject) => {
+    execFile(ffmpeg, [
+      '-y', '-i', mp3Path,
+      '-c:a', 'libopus', '-b:a', '64k', '-vbr', 'on',
+      '-application', 'voip', '-ac', '1', '-ar', '48000',
+      oggPath,
+    ], { windowsHide: true, timeout: 30000 }, (err) => {
+      if (err) {
+        reject(new Error('ffmpeg conversion failed: ' + err.message));
+        return;
+      }
+      if (!fs.existsSync(oggPath)) {
+        reject(new Error('ffmpeg produced no output file'));
+        return;
+      }
+      resolve(oggPath);
+    });
+  });
+}
 
 const TEMP_DIR = path.join(__dirname, '..', 'temp');
 if (!fs.existsSync(TEMP_DIR)) {
@@ -146,7 +181,15 @@ export async function textToSpeech(text: string, messageId: string): Promise<str
   }
 
   fs.writeFileSync(outputPath, Buffer.concat(buffers));
-  return outputPath;
+  // Convert MP3 to OGG/Opus for WhatsApp mobile compatibility (PTT format)
+  try {
+    const oggPath = await convertMp3ToOgg(outputPath);
+    try { fs.unlinkSync(outputPath); } catch {}
+    return oggPath;
+  } catch (err: any) {
+    console.error(`⚠️ OGG conversion failed, using MP3 fallback: ${err.message}`);
+    return outputPath;
+  }
 }
 
 /**

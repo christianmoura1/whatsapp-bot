@@ -259,12 +259,20 @@ async function connectToWhatsApp() {
 
         addToConversation(conversationKey, 'assistant', response);
 
-        // Send text response
-        await sock.sendMessage(sender, { text: response }, {
-          quoted: isGroup ? msg : undefined,
-        });
+        // Decide reply mode: if the incoming message was audio, reply with audio ONLY (no text).
+        // Otherwise send text, and optionally also audio if auto_reply_audio is enabled.
+        const autoReplyAudio = getSetting('auto_reply_audio') === 'true';
+        const replyWithAudioOnly = isAudioMessage; // audio-in → audio-out only
+        const replyWithAudioAlso = !isAudioMessage && autoReplyAudio && response.length < 500;
 
-        // Check for quote PDF generation
+        // Send text response — SKIP when replying to audio (user wants audio-only reply)
+        if (!replyWithAudioOnly) {
+          await sock.sendMessage(sender, { text: response }, {
+            quoted: isGroup ? msg : undefined,
+          });
+        }
+
+        // Check for quote PDF generation (still send PDF even on audio replies)
         if (isQuoteRequest) {
           const quoteData = parseQuoteFromAI(response, senderName);
           if (quoteData) {
@@ -277,7 +285,6 @@ async function connectToWhatsApp() {
                 mimetype: 'application/pdf',
                 caption: `📋 Orçamento gerado para ${quoteData.clientName}`,
               });
-              // Clean up PDF
               try { fs.unlinkSync(pdfPath); } catch {}
               console.log(`📄 PDF de orçamento enviado para ${senderName}`);
             } catch (pdfErr: any) {
@@ -286,22 +293,27 @@ async function connectToWhatsApp() {
           }
         }
 
-        // Generate audio response if original message was audio or auto_reply_audio is enabled
-        const autoReplyAudio = getSetting('auto_reply_audio') === 'true';
-        if ((isAudioMessage || autoReplyAudio) && response.length < 500) {
+        // Generate and send audio response (OGG/Opus for WhatsApp mobile PTT compatibility)
+        if ((replyWithAudioOnly || replyWithAudioAlso) && response.length < 500) {
           try {
             console.log(`🔊 Gerando resposta em áudio para ${senderName}...`);
             const ttsPath = await textToSpeech(response, msg.key.id || 'unknown');
+            const isOgg = ttsPath.toLowerCase().endsWith('.ogg');
             await sock.sendMessage(sender, {
               audio: fs.readFileSync(ttsPath),
-              mimetype: 'audio/mpeg',
+              mimetype: isOgg ? 'audio/ogg; codecs=opus' : 'audio/mpeg',
               ptt: true,
             });
-            // Clean up TTS file
             try { fs.unlinkSync(ttsPath); } catch {}
-            console.log(`🔊 Áudio enviado para ${senderName}`);
+            console.log(`🔊 Áudio enviado para ${senderName} (${isOgg ? 'ogg/opus' : 'mp3'})`);
           } catch (ttsErr: any) {
             console.error('❌ Erro ao gerar áudio:', ttsErr.message);
+            // Fallback: if we skipped text because it was audio-in, send text now so user isn't left without a reply
+            if (replyWithAudioOnly) {
+              try {
+                await sock.sendMessage(sender, { text: response }, { quoted: isGroup ? msg : undefined });
+              } catch {}
+            }
           }
         }
 

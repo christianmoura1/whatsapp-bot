@@ -248,7 +248,9 @@ app.get('/api/test-audio', async (req, res) => {
     const { textToSpeech } = await import('./audio');
     const testText = 'Olá! Este é um teste de áudio do WhatsApp Bot. Se você está ouvindo esta mensagem, a síntese de voz está funcionando corretamente.';
     const audioPath = await textToSpeech(testText, 'test_' + Date.now());
-    res.set('Content-Type', 'audio/mpeg');
+    // Detect content type from file extension (OGG/Opus for WhatsApp mobile, MP3 fallback)
+    const isOgg = audioPath.toLowerCase().endsWith('.ogg');
+    res.set('Content-Type', isOgg ? 'audio/ogg' : 'audio/mpeg');
     res.set('Cache-Control', 'no-cache');
     res.sendFile(path.resolve(audioPath));
   } catch (err: any) {
