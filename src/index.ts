@@ -23,6 +23,7 @@ import {
 import { startPanel, setQrCode, setConnectionStatus } from './panel';
 import { transcribeAudio, textToSpeech, downloadMedia, saveAudioBuffer } from './audio';
 import { generateQuotePdf, parseQuoteFromAI, getQuotePromptAddition } from './quote';
+import { generateImage, detectImageRequest, enhancePrompt } from './image';
 
 const AUTH_DIR = path.join(__dirname, '..', 'auth');
 
@@ -243,6 +244,34 @@ async function connectToWhatsApp() {
       try {
         const conversationKey = isGroup ? `${sender}_${msg.key.participant}` : sender;
         const history = getConversation(conversationKey);
+
+        // Check if this is an image generation request — handle BEFORE calling the LLM
+        const imagePrompt = detectImageRequest(messageToProcess);
+        if (imagePrompt) {
+          try {
+            console.log(`🎨 Gerando imagem para ${senderName}: "${imagePrompt}"...`);
+            await sock.sendMessage(sender, { text: `🎨 Gerando imagem: "${imagePrompt}"... Aguarde alguns segundos.` }, {
+              quoted: isGroup ? msg : undefined,
+            });
+            const enhancedImgPrompt = enhancePrompt(imagePrompt);
+            const imgPath = await generateImage(enhancedImgPrompt, msg.key.id || 'unknown');
+            await sock.sendMessage(sender, {
+              image: fs.readFileSync(imgPath),
+              caption: `🎨 ${imagePrompt}`,
+              mimetype: 'image/jpeg',
+            });
+            try { fs.unlinkSync(imgPath); } catch {}
+            console.log(`🎨 Imagem enviada para ${senderName}`);
+            // Log and skip the rest of the AI flow for this message
+            const senderPhoneImg = (msg.key.participant || sender).replace('@s.whatsapp.net', '');
+            logMessage(senderPhoneImg, senderName, messageToProcess, `[Imagem gerada: ${imagePrompt}]`, 'pollinations', isGroup, isGroup ? sender : undefined);
+            continue;
+          } catch (imgErr: any) {
+            console.error('❌ Erro ao gerar imagem:', imgErr.message);
+            await sock.sendMessage(sender, { text: `⚠️ Erro ao gerar imagem: ${imgErr.message}` });
+            continue;
+          }
+        }
 
         // Check if this is a quote request
         const isQuoteRequest = /orçamento|orcamento|budget|quote|preço|preco|quanto custa|valor de/i.test(messageToProcess);
