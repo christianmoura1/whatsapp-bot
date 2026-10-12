@@ -77,7 +77,28 @@ h2 { color: #fff; margin-bottom: 15px; font-size: 1.3rem; border-bottom: 1px sol
 </style>
 </head>
 <body>
-<!-- Login Screen -->
+<!-- Remote Setup Screen (shown first on Vercel) -->
+<div id="remoteSetupScreen" class="login-screen" style="display:none;">
+<div class="login-card" style="max-width:500px;">
+<h1>🌐 Conexão Remota</h1>
+<p style="color:#888; margin-bottom:20px;">Configure a conexão com a VPS para controlar o bot remotamente.</p>
+<div class="form-group">
+<label style="color:#aaa; font-size:0.9rem; display:block; margin-bottom:5px;">URL da VPS</label>
+<input type="text" id="setupVpsUrl" placeholder="http://154.64.32.227:3456" value="http://154.64.32.227:3456">
+</div>
+<div class="form-group">
+<label style="color:#aaa; font-size:0.9rem; display:block; margin-bottom:5px;">API Token</label>
+<input type="text" id="setupApiToken" placeholder="wabot_..." value="wabot_rh987u3v7ajmv5gthdb">
+</div>
+<div class="form-group">
+<label style="color:#aaa; font-size:0.9rem; display:block; margin-bottom:5px;">Senha do Painel</label>
+<input type="password" id="setupPassword" placeholder="admin123" value="admin123">
+</div>
+<button class="btn btn-primary" style="width:100%" onclick="doRemoteSetup()">Conectar à VPS</button>
+<div id="setupResult" style="margin-top:10px;"></div>
+</div>
+</div>
+<!-- Login Screen (for local access) -->
 <div id="loginScreen" class="login-screen">
 <div class="login-card">
 <h1>🤖 WhatsApp Bot</h1>
@@ -269,6 +290,40 @@ function toast(msg, type = 'success') {
   t.textContent = msg;
   document.body.appendChild(t);
   setTimeout(() => t.remove(), 3000);
+}
+
+async function doRemoteSetup() {
+  const url = document.getElementById('setupVpsUrl').value.trim();
+  const tok = document.getElementById('setupApiToken').value.trim();
+  const pw = document.getElementById('setupPassword').value.trim();
+  const el = document.getElementById('setupResult');
+  if (!url || !tok) { el.innerHTML = '<span style="color:#e74c3c">Preencha URL e Token</span>'; return; }
+  el.innerHTML = '<span style="color:#888">Testando conexão com VPS...</span>';
+  try {
+    const healthRes = await fetch(url.replace(/\/$/, '') + '/api/health', { headers: { 'X-API-Token': tok } });
+    const health = await healthRes.json();
+    if (!health.ok) { el.innerHTML = '<span style="color:#e74c3c">❌ Token inválido ou VPS inacessível</span>'; return; }
+    // Test login
+    const loginRes = await fetch(url.replace(/\/$/, '') + '/api/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'X-API-Token': tok },
+      body: JSON.stringify({ password: pw })
+    });
+    const loginData = await loginRes.json();
+    if (!loginData.success) { el.innerHTML = '<span style="color:#e74c3c">❌ Senha incorreta</span>'; return; }
+    // Save config
+    remoteApiUrl = url;
+    remoteApiToken = tok;
+    token = loginData.token;
+    localStorage.setItem('bot_remote_url', url);
+    localStorage.setItem('bot_remote_token', tok);
+    localStorage.setItem('bot_token', token);
+    document.getElementById('remoteSetupScreen').style.display = 'none';
+    document.getElementById('app').style.display = 'block';
+    loadAll();
+    toast('✅ Conectado à VPS!');
+  } catch (e) {
+    el.innerHTML = `<span style="color:#e74c3c">❌ Falha: ${e.message}</span>`;
+  }
 }
 
 async function doLogin() {
@@ -500,11 +555,17 @@ async function testRemoteConnection() {
 // Auto-refresh status every 5 seconds
 setInterval(() => { if (token) loadStatus(); }, 5000);
 
-// Check if already logged in
-if (token) {
+// Check if already logged in or needs remote setup
+const isVercelHost = window.location.hostname.endsWith('.vercel.app');
+if (token && (remoteApiUrl || !isVercelHost)) {
   document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('remoteSetupScreen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   loadAll();
+} else if (isVercelHost) {
+  // On Vercel without config: show remote setup screen first
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('remoteSetupScreen').style.display = 'flex';
 }
 </script>
 </body>
