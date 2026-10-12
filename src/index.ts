@@ -14,6 +14,7 @@ import {
   initDb,
   isUserAllowed,
   isUserBlocked,
+  isAdmin,
   logMessage,
   getSetting,
   getGroupSettings,
@@ -24,6 +25,14 @@ import { startPanel, setQrCode, setConnectionStatus } from './panel';
 import { transcribeAudio, textToSpeech, downloadMedia, saveAudioBuffer } from './audio';
 import { generateQuotePdf, parseQuoteFromAI, getQuotePromptAddition } from './quote';
 import { generateImage, detectImageRequest, enhancePrompt } from './image';
+import {
+  resolveCommand,
+  startScheduledTask,
+  getLastTaskResult,
+  buildHelpText,
+  formatTriggerReply,
+  formatStatusReply,
+} from './commands';
 
 const AUTH_DIR = path.join(__dirname, '..', 'auth');
 
@@ -235,6 +244,47 @@ async function connectToWhatsApp() {
               `Modelo atual: *${getSetting('default_model')}*`,
           });
           continue;
+        }
+
+        // ─── Pipeline control commands (admin-only) ────────────────────────
+        // /painéis or /help-paineis → list available pipeline triggers (anyone can see the list)
+        const lowerText = text.trim().toLowerCase();
+        if (lowerText === '/painéis' || lowerText === '/paineis' || lowerText === '/help-paineis') {
+          await sock.sendMessage(sender, { text: buildHelpText() });
+          continue;
+        }
+
+        // /status <trigger> → show last run result for a pipeline (admin-only)
+        const statusMatch = text.trim().match(/^\/status\s+(\S+)\s*$/i);
+        if (statusMatch) {
+          if (!isAdmin(senderJid)) {
+            await sock.sendMessage(sender, { text: '🚫 Apenas administradores podem consultar o status dos painéis.' });
+            continue;
+          }
+          const cmd = resolveCommand(statusMatch[1]);
+          if (!cmd) {
+            await sock.sendMessage(sender, { text: `⚠️ Comando desconhecido: \`${statusMatch[1]}\`. Digite */painéis* para ver a lista.` });
+            continue;
+          }
+          const info = await getLastTaskResult(cmd.taskName);
+          await sock.sendMessage(sender, { text: formatStatusReply(cmd, info) });
+          continue;
+        }
+
+        // /<trigger> → fire the corresponding Scheduled Task (admin-only)
+        if (text.trim().startsWith('/')) {
+          const triggerRaw = text.trim().substring(1).split(/\s+/)[0];
+          const cmd = resolveCommand(triggerRaw);
+          if (cmd) {
+            if (!isAdmin(senderJid)) {
+              await sock.sendMessage(sender, { text: `🚫 Apenas administradores podem disparar atualizações de painel. Comando */${cmd.trigger}* negado.` });
+              continue;
+            }
+            console.log(`⚡ [ADMIN] ${senderName} (${senderJid}) disparou: ${cmd.taskName}`);
+            const result = await startScheduledTask(cmd.taskName);
+            await sock.sendMessage(sender, { text: formatTriggerReply(cmd, result) });
+            continue;
+          }
         }
       }
 

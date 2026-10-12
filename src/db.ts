@@ -237,6 +237,47 @@ export function getAllGroups(): any[] {
   }));
 }
 
+// ─── Admin users (pipeline command access control) ────────────────────────
+// Only JIDs in this table may run /backlog, /risco, /preventivas, etc.
+// The admin_users table is created lazily on first check so existing DBs work.
+function ensureAdminTable(): void {
+  getDb().run('CREATE TABLE IF NOT EXISTS admin_users (jid TEXT PRIMARY KEY, name TEXT, added_at TEXT)');
+}
+
+export function isAdmin(jid: string): boolean {
+  if (!jid) return false;
+  ensureAdminTable();
+  // Flexible match: exact JID, or partial (handles @lid vs @s.whatsapp.net and bare numbers)
+  const result = getDb().exec(
+    'SELECT jid FROM admin_users WHERE jid = ? OR jid LIKE ? OR ? LIKE jid',
+    [jid, `%${jid}%`, `%${jid}%`]
+  );
+  return result.length > 0 && result[0].values.length > 0;
+}
+
+export function addAdmin(jid: string, name?: string): void {
+  ensureAdminTable();
+  getDb().run('INSERT OR REPLACE INTO admin_users (jid, name, added_at) VALUES (?, ?, ?)', [jid, name || jid, new Date().toISOString()]);
+  saveDb();
+}
+
+export function removeAdmin(jid: string): void {
+  ensureAdminTable();
+  getDb().run('DELETE FROM admin_users WHERE jid = ?', [jid]);
+  saveDb();
+}
+
+export function getAllAdmins(): { jid: string; name: string; added_at: string }[] {
+  ensureAdminTable();
+  const result = getDb().exec('SELECT jid, name, added_at FROM admin_users ORDER BY added_at DESC');
+  if (result.length === 0) return [];
+  return result[0].values.map((row: any[]) => ({
+    jid: row[0],
+    name: row[1],
+    added_at: row[2],
+  }));
+}
+
 export function getStats(): { total_messages: number; today_messages: number; allowed_users: number; blocked_users: number } {
   const totalResult = getDb().exec('SELECT COUNT(*) FROM message_log');
   const todayResult = getDb().exec("SELECT COUNT(*) FROM message_log WHERE date(timestamp) = date('now')");
