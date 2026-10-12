@@ -4,3 +4,4 @@ auth/
 data/
 .env
 *.log
+.vercel
