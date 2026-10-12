@@ -573,13 +573,12 @@ async function testRemoteConnection() {
 setInterval(() => { if (token) loadStatus(); }, 5000);
 
 // Check if already logged in or needs remote setup
-const isVercelHost = window.location.hostname.endsWith('.vercel.app');
-if (token && (remoteApiUrl || !isVercelHost)) {
+if (token && (remoteApiUrl || !isVercelHost())) {
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('remoteSetupScreen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   loadAll();
-} else if (isVercelHost) {
+} else if (isVercelHost()) {
   // On Vercel without config: show remote setup screen first
   document.getElementById('loginScreen').style.display = 'none';
   document.getElementById('remoteSetupScreen').style.display = 'flex';
