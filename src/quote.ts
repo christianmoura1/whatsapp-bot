@@ -16,6 +16,9 @@ export interface QuoteItem {
 
 export interface QuoteData {
   clientName: string;
+  clientAddress?: string;
+  clientPhone?: string;
+  clientEmail?: string;
   items: QuoteItem[];
   observations?: string;
   validityDays?: number;
@@ -68,11 +71,20 @@ export async function generateQuotePdf(data: QuoteData, messageId: string): Prom
   doc.text(`Data: ${dateStr}`, 350, doc.y - 12);
   doc.moveDown(1);
 
-  // Client info
+  // Client info (extracted from the conversation with the requester)
   doc.fontSize(12).fillColor('#1a5276').text('Cliente');
   doc.moveTo(50, doc.y).lineTo(545, doc.y).strokeColor('#cccccc').lineWidth(1).stroke();
   doc.moveDown(0.3);
   doc.fontSize(11).fillColor('#333333').text(data.clientName);
+  if (data.clientAddress) {
+    doc.fontSize(10).fillColor('#555555').text(data.clientAddress);
+  }
+  if (data.clientPhone) {
+    doc.fontSize(10).fillColor('#555555').text(`Tel: ${data.clientPhone}`);
+  }
+  if (data.clientEmail) {
+    doc.fontSize(10).fillColor('#555555').text(`E-mail: ${data.clientEmail}`);
+  }
   doc.moveDown(1);
 
   // Items table header
@@ -188,6 +200,9 @@ export function parseQuoteFromAI(aiResponse: string, clientName: string): QuoteD
 
     return {
       clientName: parsed.clientName || clientName,
+      clientAddress: parsed.clientAddress || parsed.address || undefined,
+      clientPhone: parsed.clientPhone || parsed.phone || undefined,
+      clientEmail: parsed.clientEmail || parsed.email || undefined,
       items: parsed.items.map((item: any) => ({
         description: item.description || item.desc || 'Item',
         quantity: Number(item.quantity || item.qty || 1),
@@ -207,9 +222,12 @@ export function parseQuoteFromAI(aiResponse: string, clientName: string): QuoteD
  */
 export function getQuotePromptAddition(): string {
   return `
-Quando o usuário pedir um orçamento, crie um orçamento profissional e responda com um JSON estruturado dentro de um bloco \`\`\`json ... \`\`\`. O JSON deve ter este formato exato:
+Quando o usuário pedir um orçamento, EXTRAIA os dados do cliente da própria conversa (nome, endereço, telefone, e-mail — o que ele informar) e crie um orçamento profissional. Responda com um JSON estruturado dentro de um bloco \`\`\`json ... \`\`\`. O JSON deve ter este formato exato:
 {
-  "clientName": "Nome do Cliente",
+  "clientName": "Nome do Cliente (extraído da conversa)",
+  "clientAddress": "Endereço do cliente (se informado, senão omitir)",
+  "clientPhone": "Telefone do cliente (se informado, senão omitir)",
+  "clientEmail": "E-mail do cliente (se informado, senão omitir)",
   "items": [
     {"description": "Descrição do serviço/produto", "quantity": 1, "unitPrice": 150.00}
   ],
@@ -217,6 +235,7 @@ Quando o usuário pedir um orçamento, crie um orçamento profissional e respond
   "validityDays": 15,
   "paymentTerms": "Condições de pagamento (opcional)"
 }
+IMPORTANTE: Os dados do cliente (nome, endereço, telefone) devem vir do que a pessoa escreveu na conversa. Se ela não informou algo, omita o campo — não invente dados.
 Depois do JSON, adicione uma mensagem amigável confirmando que o orçamento foi gerado.
 Sempre inclua pelo menos um item. Use preços realistas em Reais (BRL).`;
 }

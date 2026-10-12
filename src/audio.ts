@@ -1,6 +1,7 @@
 import Groq from 'groq-sdk';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
 import { getSetting } from './db';
 
 const TEMP_DIR = path.join(__dirname, '..', 'temp');
@@ -38,76 +39,137 @@ export async function transcribeAudio(audioFilePath: string): Promise<string> {
 }
 
 /**
- * Generate speech from text using Microsoft Edge TTS API (free, no key needed)
- * Uses the WebSocket-based Edge TTS protocol directly
+ * Generate speech using Microsoft Edge TTS via WebSocket (free, neural voices, no API key)
+ * Implements the Edge TTS protocol directly — no external dependencies needed.
  */
 export async function textToSpeech(text: string, messageId: string): Promise<string> {
   const voice = getSetting('tts_voice') || 'pt-BR-AntonioNeural';
   const outputPath = path.join(TEMP_DIR, `tts_${messageId}_${Date.now()}.mp3`);
 
-  // Use the Edge TTS REST-like endpoint via fetch
-  // Microsoft Edge TTS uses a WebSocket protocol, but we can use the simpler HTTP approach
-  // via the speech.platform.bing.com endpoint
-  const escapedText = text.replace(/'/g, "\\'");
-  const ssml = `<speak version='1.0' xml:lang='pt-BR'><voice name='${voice}'><prosody rate='+0%' pitch='+0Hz'>${escapedText}</prosody></voice></speak>`;
+  // Truncate very long texts to avoid TTS timeouts
+  const safeText = text.length > 500 ? text.substring(0, 497) + '...' : text;
+  const escapedText = safeText
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
 
-  // Generate a random request ID
-  const requestId = Math.random().toString(36).substring(2, 15);
-  const date = new Date().toISOString();
+  const requestId = crypto.randomUUID().replace(/-/g, '');
+  const date = new Date().toString();
 
-  // Use the Edge TTS WebSocket protocol via a simple HTTP workaround
-  // We'll use the node-fetch approach with the Bing Speech API
-  try {
-    // Try using the simpler approach: call edge-tts via npx or use a direct HTTP call
-    // Since edge-tts npm package is incompatible with Node 24, we use the REST API directly
-    const { execSync } = require('child_process');
+  const ssml = `<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xmlns:mstts="https://www.w3.org/2001/mstts" xml:lang="pt-BR"><voice name="${voice}"><prosody rate="+0%" pitch="+0Hz">${escapedText}</prosody></voice></speak>`;
 
-    // Write SSML to temp file
-    const ssmlPath = path.join(TEMP_DIR, `ssml_${messageId}_${Date.now()}.xml`);
-    fs.writeFileSync(ssmlPath, ssml);
+  return new Promise<string>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      try { ws.close(); } catch {}
+      reject(new Error('Edge TTS timeout after 20s'));
+    }, 20000);
 
-    // Use PowerShell to call the Edge TTS API via .NET (available on Windows)
-    // Or use curl with the Bing Speech endpoint
-    // Actually, let's use a simpler approach: the edge-tts Python package or direct API
-
-    // Direct approach: use the Microsoft Cognitive Services Speech SDK REST API
-    // But that requires a key. Instead, let's use the free Edge TTS via websocket simulation
-
-    // Simplest working approach for Windows: use the built-in SAPI via PowerShell
-    const psCommand = `
-      Add-Type -AssemblyName System.Speech;
-      $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer;
-      $synth.SetOutputToWaveFile('${outputPath.replace(/\\/g, '\\\\')}');
-      $synth.Speak('${text.replace(/'/g, "''")}');
-      $synth.Dispose();
-    `;
-
+    let ws: any;
     try {
-      execSync(`powershell -NoProfile -Command "${psCommand.replace(/\n/g, ' ')}"`, {
-        timeout: 15000,
-        windowsHide: true,
+      // Use the built-in WebSocket available in Node 22+ or fall back to a manual implementation
+      const WebSocketImpl = (globalThis as any).WebSocket || require('ws');
+      ws = new WebSocketImpl(
+        'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=' + requestId,
+        { headers: { 'Origin': 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold' } }
+      );
+    } catch (err: any) {
+      clearTimeout(timeout);
+      // Fallback: try dynamic import of 'ws'
+      import('ws').then((wsModule) => {
+        doTTS(wsModule.default || wsModule.WebSocket, ssml, requestId, date, voice, outputPath, resolve, reject, timeout);
+      }).catch(() => {
+        reject(new Error('WebSocket not available for Edge TTS'));
       });
-
-      // Check if file was created
-      if (fs.existsSync(outputPath)) {
-        // Clean up SSML file
-        try { fs.unlinkSync(ssmlPath); } catch {}
-        return outputPath;
-      }
-    } catch (psErr: any) {
-      console.log('⚠️ PowerShell SAPI failed, trying alternative...');
+      return;
     }
 
-    // Fallback: generate a simple silent audio or use the text as-is
-    // For now, create a minimal valid MP3 file (silence) as fallback
-    // Actually, let's just skip audio if TTS fails
-    try { fs.unlinkSync(ssmlPath); } catch {}
-    throw new Error('TTS generation failed - PowerShell SAPI not available');
+    doTTS(ws.constructor === Function ? ws.constructor : (globalThis as any).WebSocket, ssml, requestId, date, voice, outputPath, resolve, reject, timeout, ws);
+  });
+}
 
+function doTTS(
+  WSClass: any,
+  ssml: string,
+  requestId: string,
+  date: string,
+  voice: string,
+  outputPath: string,
+  resolve: (value: string) => void,
+  reject: (reason: any) => void,
+  timeout: ReturnType<typeof setTimeout>,
+  existingWs?: any
+) {
+  const audioChunks: Buffer[] = [];
+  let ws: any;
+
+  try {
+    ws = existingWs || new WSClass(
+      'wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4&ConnectionId=' + requestId,
+      existingWs ? undefined : { headers: { 'Origin': 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold' } }
+    );
   } catch (err: any) {
-    console.error('❌ TTS error:', err.message);
-    throw err;
+    clearTimeout(timeout);
+    reject(new Error('Failed to create WebSocket: ' + err.message));
+    return;
   }
+
+  ws.onopen = () => {
+    // Send config message
+    const configMsg = `Content-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}\r\n`;
+    ws.send(configMsg);
+
+    // Send SSML request
+    const ssmlMsg = `X-RequestId:${requestId}\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n${ssml}`;
+    ws.send(ssmlMsg);
+  };
+
+  ws.onmessage = (event: any) => {
+    const data = event.data;
+    if (data instanceof ArrayBuffer) {
+      // Binary audio data — skip the header (first 2 bytes are length of header)
+      const buf = Buffer.from(data);
+      if (buf.length > 2) {
+        const headerLen = buf.readUInt16BE(0);
+        if (buf.length > headerLen + 2) {
+          audioChunks.push(buf.slice(headerLen + 2));
+        }
+      }
+    } else if (typeof data === 'string') {
+      if (data.includes('Path:turn.end')) {
+        // TTS complete — write file
+        clearTimeout(timeout);
+        try { ws.close(); } catch {}
+        const audioBuffer = Buffer.concat(audioChunks);
+        if (audioBuffer.length > 0) {
+          fs.writeFileSync(outputPath, audioBuffer);
+          resolve(outputPath);
+        } else {
+          reject(new Error('Edge TTS returned empty audio'));
+        }
+      }
+    }
+  };
+
+  ws.onerror = (err: any) => {
+    clearTimeout(timeout);
+    try { ws.close(); } catch {}
+    reject(new Error('Edge TTS WebSocket error: ' + (err.message || 'unknown')));
+  };
+
+  ws.onclose = () => {
+    clearTimeout(timeout);
+    // If we have audio data, save it even on close
+    if (audioChunks.length > 0 && !fs.existsSync(outputPath)) {
+      const audioBuffer = Buffer.concat(audioChunks);
+      if (audioBuffer.length > 0) {
+        fs.writeFileSync(outputPath, audioBuffer);
+        resolve(outputPath);
+        return;
+      }
+    }
+  };
 }
 
 /**
