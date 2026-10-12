@@ -73,6 +73,12 @@ export async function initDb(): Promise<void> {
     panel_password: 'admin123',
     respond_to_all_private: 'true',
     max_tokens: '4096',
+    groq_api_key: '',
+    tts_voice: 'pt-BR-AntonioNeural',
+    auto_reply_audio: 'false',
+    company_name: 'Manutenção Sul',
+    company_phone: '',
+    company_address: '',
   };
 
   for (const [key, value] of Object.entries(defaultSettings)) {

@@ -21,6 +21,8 @@ import {
   addAllowedUser,
 } from './db';
 import { startPanel, setQrCode, setConnectionStatus } from './panel';
+import { transcribeAudio, textToSpeech, downloadMedia, saveAudioBuffer } from './audio';
+import { generateQuotePdf, parseQuoteFromAI, getQuotePromptAddition } from './quote';
 
 const AUTH_DIR = path.join(__dirname, '..', 'auth');
 
@@ -105,15 +107,47 @@ async function connectToWhatsApp() {
         msg.message?.extendedTextMessage?.text ||
         '';
 
-      if (!text.trim()) continue;
+      // Detect audio messages (voice notes or audio files)
+      const hasAudio = !!(msg.message?.audioMessage);
+      let messageToProcess = text;
+      let isAudioMessage = false;
+      let audioResponsePath: string | null = null;
+
+      if (hasAudio && !text.trim()) {
+        // Audio message without caption — transcribe it
+        console.log(`🎤 [${isGroup ? 'Grupo' : 'Privado'}] ${senderName} (${sender}): [Áudio recebido, transcrevendo...]`);
+        try {
+          const media = await downloadMedia(msg, sock);
+          if (media) {
+            const ext = media.mimeType.includes('ogg') ? 'ogg' : media.mimeType.includes('mp4') ? 'm4a' : 'ogg';
+            const audioPath = saveAudioBuffer(media.buffer, msg.key.id || 'unknown', ext);
+            const transcribed = await transcribeAudio(audioPath);
+            messageToProcess = transcribed;
+            isAudioMessage = true;
+            console.log(`📝 Transcrição: ${transcribed.substring(0, 100)}...`);
+            // Clean up temp audio file
+            try { fs.unlinkSync(audioPath); } catch {}
+          } else {
+            console.log('⚠️ Não foi possível baixar o áudio');
+            continue;
+          }
+        } catch (err: any) {
+          console.error('❌ Erro na transcrição:', err.message);
+          await sock.sendMessage(sender, { text: `⚠️ Erro ao transcrever áudio: ${err.message}` });
+          continue;
+        }
+      } else if (!text.trim()) {
+        continue;
+      }
+
+      if (!messageToProcess.trim()) continue;
 
       console.log(
-        `📨 [${isGroup ? 'Grupo' : 'Privado'}] ${senderName} (${sender}): ${text.substring(0, 80)}...`
+        `📨 [${isGroup ? 'Grupo' : 'Privado'}] ${senderName} (${sender}): ${messageToProcess.substring(0, 80)}...`
       );
 
       // Check if bot should respond
       let shouldRespond = false;
-      let messageToProcess = text;
 
       if (isGroup) {
         // Group logic
@@ -210,15 +244,66 @@ async function connectToWhatsApp() {
         const conversationKey = isGroup ? `${sender}_${msg.key.participant}` : sender;
         const history = getConversation(conversationKey);
 
+        // Check if this is a quote request
+        const isQuoteRequest = /orçamento|orcamento|budget|quote|preço|preco|quanto custa|valor de/i.test(messageToProcess);
+
+        // Build system prompt with quote instructions if needed
+        let enhancedMessage = messageToProcess;
+        if (isQuoteRequest) {
+          enhancedMessage = messageToProcess + '\n\n' + getQuotePromptAddition();
+        }
+
         addToConversation(conversationKey, 'user', messageToProcess);
 
-        const response = await chatCompletion(messageToProcess, history);
+        const response = await chatCompletion(enhancedMessage, history);
 
         addToConversation(conversationKey, 'assistant', response);
 
+        // Send text response
         await sock.sendMessage(sender, { text: response }, {
           quoted: isGroup ? msg : undefined,
         });
+
+        // Check for quote PDF generation
+        if (isQuoteRequest) {
+          const quoteData = parseQuoteFromAI(response, senderName);
+          if (quoteData) {
+            try {
+              console.log(`📄 Gerando PDF de orçamento para ${senderName}...`);
+              const pdfPath = await generateQuotePdf(quoteData, msg.key.id || 'unknown');
+              await sock.sendMessage(sender, {
+                document: fs.readFileSync(pdfPath),
+                fileName: `Orcamento_${quoteData.clientName.replace(/\s+/g, '_')}.pdf`,
+                mimetype: 'application/pdf',
+                caption: `📋 Orçamento gerado para ${quoteData.clientName}`,
+              });
+              // Clean up PDF
+              try { fs.unlinkSync(pdfPath); } catch {}
+              console.log(`📄 PDF de orçamento enviado para ${senderName}`);
+            } catch (pdfErr: any) {
+              console.error('❌ Erro ao gerar PDF:', pdfErr.message);
+            }
+          }
+        }
+
+        // Generate audio response if original message was audio or auto_reply_audio is enabled
+        const autoReplyAudio = getSetting('auto_reply_audio') === 'true';
+        if ((isAudioMessage || autoReplyAudio) && response.length < 500) {
+          try {
+            console.log(`🔊 Gerando resposta em áudio para ${senderName}...`);
+            const ttsPath = await textToSpeech(response, msg.key.id || 'unknown');
+            await sock.sendMessage(sender, {
+              audio: fs.readFileSync(ttsPath),
+              mimetype: 'audio/mpeg',
+              ptt: true,
+            });
+            // Clean up TTS file
+            try { fs.unlinkSync(ttsPath); } catch {}
+            console.log(`🔊 Áudio enviado para ${senderName}`);
+          } catch (ttsErr: any) {
+            console.error('❌ Erro ao gerar áudio:', ttsErr.message);
+          }
+        }
 
         const senderPhone = (msg.key.participant || sender).replace('@s.whatsapp.net', '');
         logMessage(

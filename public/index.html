@@ -179,6 +179,52 @@ h2 { color: #fff; margin-bottom: 15px; font-size: 1.3rem; border-bottom: 1px sol
 <div id="testResult" style="margin-top:10px;"></div>
 </div>
 <div class="card">
+<h2>🎤 Áudio (Transcrição + Voz)</h2>
+<div class="form-group">
+<label>Groq API Key (para transcrever áudio — grátis em groq.com)</label>
+<input type="password" id="groqApiKey" placeholder="gsk_...">
+</div>
+<div class="form-group">
+<label>Voz TTS (resposta em áudio)</label>
+<select id="ttsVoice">
+<option value="pt-BR-AntonioNeural">Antônio (masculino)</option>
+<option value="pt-BR-FranciscaNeural">Francisca (feminino)</option>
+<option value="pt-BR-BrendaNeural">Brenda (feminino)</option>
+<option value="pt-BR-DonatoNeural">Donato (masculino)</option>
+<option value="pt-BR-FabioNeural">Fábio (masculino)</option>
+<option value="pt-BR-ManuelaNeural">Manuela (feminino)</option>
+<option value="pt-BR-NicolauNeural">Nicolau (masculino)</option>
+<option value="pt-BR-ThalitaNeural">Thalita (feminino)</option>
+<option value="pt-BR-ValerioNeural">Valério (masculino)</option>
+<option value="pt-BR-YaraNeural">Yara (feminino)</option>
+</select>
+</div>
+<div class="form-group">
+<label>Responder com áudio automaticamente?</label>
+<select id="autoReplyAudio">
+<option value="false">Não — só quando receber áudio</option>
+<option value="true">Sim — sempre responder com áudio</option>
+</select>
+</div>
+<button class="btn btn-primary" onclick="saveSettings()">Salvar Configurações</button>
+</div>
+<div class="card">
+<h2>📄 Orçamento PDF</h2>
+<div class="form-group">
+<label>Nome da Empresa</label>
+<input type="text" id="companyName" value="Manutenção Sul">
+</div>
+<div class="form-group">
+<label>Telefone da Empresa</label>
+<input type="text" id="companyPhone" placeholder="(11) 99999-9999">
+</div>
+<div class="form-group">
+<label>Endereço da Empresa</label>
+<input type="text" id="companyAddress" placeholder="Rua Exemplo, 123 - São Paulo/SP">
+</div>
+<button class="btn btn-primary" onclick="saveSettings()">Salvar Configurações</button>
+</div>
+<div class="card">
 <h2>🤖 Comportamento do Bot</h2>
 <div class="form-group">
 <label>System Prompt (instrução para a IA)</label>
@@ -391,6 +437,14 @@ async function loadSettings() {
   document.getElementById('systemPrompt').value = s.system_prompt || '';
   document.getElementById('maxTokens').value = s.max_tokens || '4096';
   document.getElementById('respondToAll').value = s.respond_to_all_private || 'true';
+  // Audio settings
+  if (document.getElementById('groqApiKey') && s.groq_api_key) document.getElementById('groqApiKey').placeholder = '•••••••• (configurada)';
+  if (document.getElementById('ttsVoice')) document.getElementById('ttsVoice').value = s.tts_voice || 'pt-BR-AntonioNeural';
+  if (document.getElementById('autoReplyAudio')) document.getElementById('autoReplyAudio').value = s.auto_reply_audio || 'false';
+  // Company settings
+  if (document.getElementById('companyName')) document.getElementById('companyName').value = s.company_name || 'Manutenção Sul';
+  if (document.getElementById('companyPhone')) document.getElementById('companyPhone').value = s.company_phone || '';
+  if (document.getElementById('companyAddress')) document.getElementById('companyAddress').value = s.company_address || '';
 }
 
 async function saveSettings() {
@@ -400,9 +454,16 @@ async function saveSettings() {
     system_prompt: document.getElementById('systemPrompt').value,
     max_tokens: document.getElementById('maxTokens').value,
     respond_to_all_private: document.getElementById('respondToAll').value,
+    tts_voice: document.getElementById('ttsVoice')?.value || 'pt-BR-AntonioNeural',
+    auto_reply_audio: document.getElementById('autoReplyAudio')?.value || 'false',
+    company_name: document.getElementById('companyName')?.value || 'Manutenção Sul',
+    company_phone: document.getElementById('companyPhone')?.value || '',
+    company_address: document.getElementById('companyAddress')?.value || '',
   };
   const key = document.getElementById('apiKey').value;
   if (key) data.api_key = key;
+  const groqKey = document.getElementById('groqApiKey')?.value;
+  if (groqKey) data.groq_api_key = groqKey;
   await api('PUT', '/settings', data);
   toast('Configurações salvas!');
 }
