@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WhatsApp Bot - Painel de Administração</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0a0a; color: #e0e0e0; min-height: 100vh; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        h1 { color: #25d366; margin-bottom: 20px; font-size: 1.8rem; }
+        h2 { color: #fff; margin-bottom: 15px; font-size: 1.3rem; border-bottom: 1px solid #333; padding-bottom: 8px; }
+        .card { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: #1a1a1a; border: 1px solid #333; border-radius: 12px; padding: 20px; text-align: center; }
+        .stat-card .number { font-size: 2rem; font-weight: bold; color: #25d366; }
+        .stat-card .label { color: #888; margin-top: 5px; }
+        .form-group { margin-bottom: 15px; }
+        .form-group label { display: block; margin-bottom: 5px; color: #aaa; font-size: 0.9rem; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 10px 14px; background: #0a0a0a; border: 1px solid #444; border-radius: 8px; color: #fff; font-size: 0.95rem; }
+        .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: #25d366; }
+        .form-group textarea { resize: vertical; min-height: 80px; }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 500; transition: all 0.2s; }
+        .btn-primary { background: #25d366; color: #000; }
+        .btn-primary:hover { background: #1da851; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-danger:hover { background: #c0392b; }
+        .btn-secondary { background: #333; color: #fff; }
+        .btn-secondary:hover { background: #444; }
+        .btn-sm { padding: 6px 12px; font-size: 0.85rem; }
+        .user-list { list-style: none; }
+        .user-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; margin-bottom: 8px; }
+        .user-item .info { flex: 1; }
+        .user-item .phone { font-weight: 500; color: #fff; }
+        .user-item .name { color: #888; font-size: 0.85rem; }
+        .user-item .date { color: #666; font-size: 0.8rem; }
+        .status-badge { display: inline-block; padding: 4px 10px; border-radius: 20px; font-size: 0.8rem; font-weight: 500; }
+        .status-connected { background: #1a3a2a; color: #25d366; }
+        .status-disconnected { background: #3a1a1a; color: #e74c3c; }
+        .status-qr { background: #3a3a1a; color: #f1c40f; }
+        .tabs { display: flex; gap: 5px; margin-bottom: 20px; flex-wrap: wrap; }
+        .tab { padding: 10px 20px; background: #1a1a1a; border: 1px solid #333; border-radius: 8px; cursor: pointer; color: #888; transition: all 0.2s; }
+        .tab.active { background: #25d366; color: #000; border-color: #25d366; }
+        .tab:hover:not(.active) { background: #222; color: #fff; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        .message-log { max-height: 400px; overflow-y: auto; }
+        .log-item { padding: 12px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; margin-bottom: 8px; }
+        .log-item .header { display: flex; justify-content: space-between; margin-bottom: 5px; }
+        .log-item .sender { color: #25d366; font-weight: 500; }
+        .log-item .time { color: #666; font-size: 0.8rem; }
+        .log-item .msg { color: #ccc; font-size: 0.9rem; margin-bottom: 3px; }
+        .log-item .resp { color: #888; font-size: 0.85rem; font-style: italic; }
+        .qr-container { text-align: center; padding: 30px; }
+        .qr-container img { max-width: 300px; border-radius: 12px; }
+        .toast { position: fixed; bottom: 20px; right: 20px; padding: 14px 24px; border-radius: 8px; color: #fff; font-size: 0.95rem; z-index: 1000; animation: slideIn 0.3s ease; }
+        .toast-success { background: #25d366; color: #000; }
+        .toast-error { background: #e74c3c; }
+        @keyframes slideIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .login-screen { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .login-card { background: #1a1a1a; border: 1px solid #333; border-radius: 16px; padding: 40px; width: 100%; max-width: 400px; text-align: center; }
+        .login-card h1 { margin-bottom: 30px; }
+        .add-form { display: flex; gap: 10px; margin-bottom: 15px; }
+        .add-form input { flex: 1; }
+        .model-select { display: flex; gap: 10px; align-items: center; }
+        .model-select select { flex: 1; }
+        #app { display: none; }
+        .group-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; background: #0a0a0a; border: 1px solid #333; border-radius: 8px; margin-bottom: 8px; }
+        .toggle { position: relative; width: 44px; height: 24px; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #444; border-radius: 24px; transition: 0.3s; }
+        .toggle .slider:before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.3s; }
+        .toggle input:checked + .slider { background: #25d366; }
+        .toggle input:checked + .slider:before { transform: translateX(20px); }
+    </style>
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-screen">
+        <div class="login-card">
+            <h1>🤖 WhatsApp Bot</h1>
+            <p style="color:#888; margin-bottom:25px;">Painel de Administração</p>
+            <div class="form-group">
+                <input type="password" id="loginPassword" placeholder="Senha de acesso" onkeypress="if(event.key==='Enter')doLogin()">
+            </div>
+            <button class="btn btn-primary" style="width:100%" onclick="doLogin()">Entrar</button>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="app">
+        <div class="container">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h1>🤖 WhatsApp Bot — Admin</h1>
+                <div>
+                    <span id="connectionStatus" class="status-badge status-disconnected">Desconectado</span>
+                    <button class="btn btn-secondary btn-sm" style="margin-left:10px" onclick="logout()">Sair</button>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div class="stats-grid">
+                <div class="stat-card"><div class="number" id="statTotal">0</div><div class="label">Mensagens Totais</div></div>
+                <div class="stat-card"><div class="number" id="statToday">0</div><div class="label">Mensagens Hoje</div></div>
+                <div class="stat-card"><div class="number" id="statAllowed">0</div><div class="label">Usuários Permitidos</div></div>
+                <div class="stat-card"><div class="number" id="statBlocked">0</div><div class="label">Usuários Bloqueados</div></div>
+            </div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <div class="tab active" onclick="switchTab('settings')">⚙️ Configurações</div>
+                <div class="tab" onclick="switchTab('users')">👥 Usuários</div>
+                <div class="tab" onclick="switchTab('groups')">👨‍👩‍👧‍👦 Grupos</div>
+                <div class="tab" onclick="switchTab('messages')">💬 Mensagens</div>
+                <div class="tab" onclick="switchTab('qrcode')">📱 QR Code</div>
+            </div>
+
+            <!-- Settings Tab -->
+            <div id="tab-settings" class="tab-content active">
+                <div class="card">
+                    <h2>🔑 API Configuration</h2>
+                    <div class="form-group">
+                        <label>API Key (GhostCLI)</label>
+                        <input type="password" id="apiKey" placeholder="sk-...">
+                    </div>
+                    <div class="form-group">
+                        <label>Endpoint URL</label>
+                        <input type="text" id="apiBaseUrl" value="https://ghostcli.cloud/v1">
+                    </div>
+                    <div class="form-group">
+                        <label>Modelo Padrão</label>
+                        <select id="defaultModel">
+                            <option value="claude-fable-5.1">Claude Fable 5.1 (Máxima capacidade)</option>
+                            <option value="claude-opus-5-5">Claude Opus 5.5 (Equilíbrio)</option>
+                            <option value="claude-sonnet-5">Claude Sonnet 5 (Mais rápido)</option>
+                            <option value="z-ai/glm-5.3">GLM 5.3 (Contexto 1M)</option>
+                            <option value="gpt-6-astra">GPT-6 Astra (Contexto 1M)</option>
+                        </select>
+                    </div>
+                    <div style="display:flex; gap:10px;">
+                        <button class="btn btn-primary" onclick="saveSettings()">Salvar Configurações</button>
+                        <button class="btn btn-secondary" onclick="testConnection()">Testar Conexão</button>
+                    </div>
+                    <div id="testResult" style="margin-top:10px;"></div>
+                </div>
+                <div class="card">
+                    <h2>🤖 Comportamento do Bot</h2>
+                    <div class="form-group">
+                        <label>System Prompt (instrução para a IA)</label>
+                        <textarea id="systemPrompt">Você é um assistente útil e direto. Responda em português brasileiro.</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Max Tokens por resposta</label>
+                        <input type="number" id="maxTokens" value="4096">
+                    </div>
+                    <div class="form-group">
+                        <label>Responder todas as mensagens privadas?</label>
+                        <select id="respondToAll">
+                            <option value="true">Sim — responder todos</option>
+                            <option value="false">Não — apenas usuários permitidos</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" onclick="saveSettings()">Salvar Configurações</button>
+                </div>
+                <div class="card">
+                    <h2>🔒 Senha do Painel</h2>
+                    <div class="form-group">
+                        <label>Nova senha</label>
+                        <input type="password" id="panelPassword" placeholder="Deixe vazio para manter a atual">
+                    </div>
+                    <button class="btn btn-primary" onclick="savePassword()">Alterar Senha</button>
+                </div>
+            </div>
+
+            <!-- Users Tab -->
+            <div id="tab-users" class="tab-content">
+                <div class="card">
+                    <h2>✅ Usuários Permitidos</h2>
+                    <div class="add-form">
+                        <input type="text" id="allowPhone" placeholder="Número (ex: 5511999999999)">
+                        <input type="text" id="allowName" placeholder="Nome (opcional)">
+                        <button class="btn btn-primary btn-sm" onclick="addAllowedUser()">Adicionar</button>
+                    </div>
+                    <ul class="user-list" id="allowedList"></ul>
+                </div>
+                <div class="card">
+                    <h2>🚫 Usuários Bloqueados</h2>
+                    <div class="add-form">
+                        <input type="text" id="blockPhone" placeholder="Número (ex: 5511999999999)">
+                        <input type="text" id="blockName" placeholder="Nome (opcional)">
+                        <button class="btn btn-danger btn-sm" onclick="addBlockedUser()">Bloquear</button>
+                    </div>
+                    <ul class="user-list" id="blockedList"></ul>
+                </div>
+            </div>
+
+            <!-- Groups Tab -->
+            <div id="tab-groups" class="tab-content">
+                <div class="card">
+                    <h2>👨‍👩‍👧👦 Grupos Configurados</h2>
+                    <p style="color:#888; margin-bottom:15px;">Grupos aparecem aqui automaticamente quando alguém manda mensagem. Configure se o bot precisa ser mencionado ou não.</p>
+                    <div id="groupsList"></div>
+                </div>
+            </div>
+
+            <!-- Messages Tab -->
+            <div id="tab-messages" class="tab-content">
+                <div class="card">
+                    <h2>💬 Log de Mensagens</h2>
+                    <div class="message-log" id="messageLog"></div>
+                </div>
+            </div>
+
+            <!-- QR Code Tab -->
+            <div id="tab-qrcode" class="tab-content">
+                <div class="card">
+                    <h2>📱 Conexão WhatsApp</h2>
+                    <div class="qr-container" id="qrContainer">
+                        <p style="color:#888;">Carregando status...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let token = localStorage.getItem('bot_token') || '';
+        const API = '';
+
+        async function api(method, path, body) {
+            const opts = { method, headers: { 'Content-Type': 'application/json' } };
+            if (token) opts.headers['Authorization'] = `Bearer ${token}`;
+            if (body) opts.body = JSON.stringify(body);
+            const res = await fetch(API + path, opts);
+            return res.json();
+        }
+
+        function toast(msg, type = 'success') {
+            const t = document.createElement('div');
+            t.className = `toast toast-${type}`;
+            t.textContent = msg;
+            document.body.appendChild(t);
+            setTimeout(() => t.remove(), 3000);
+        }
+
+        async function doLogin() {
+            const pw = document.getElementById('loginPassword').value;
+            const res = await api('POST', '/api/login', { password: pw });
+            if (res.success) {
+                token = res.token;
+                localStorage.setItem('bot_token', token);
+                document.getElementById('loginScreen').style.display = 'none';
+                document.getElementById('app').style.display = 'block';
+                loadAll();
+            } else {
+                toast('Senha incorreta', 'error');
+            }
+        }
+
+        function logout() {
+            token = '';
+            localStorage.removeItem('bot_token');
+            document.getElementById('loginScreen').style.display = 'flex';
+            document.getElementById('app').style.display = 'none';
+        }
+
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('tab-' + name).classList.add('active');
+            if (name === 'messages') loadMessages();
+            if (name === 'qrcode') loadStatus();
+            if (name === 'groups') loadGroups();
+        }
+
+        async function loadAll() {
+            loadSettings();
+            loadStats();
+            loadUsers();
+            loadStatus();
+        }
+
+        async function loadSettings() {
+            const s = await api('GET', '/api/settings');
+            if (s.api_key_masked) document.getElementById('apiKey').placeholder = s.api_key_masked;
+            document.getElementById('apiBaseUrl').value = s.api_base_url || '';
+            document.getElementById('defaultModel').value = s.default_model || 'claude-fable-5.1';
+            document.getElementById('systemPrompt').value = s.system_prompt || '';
+            document.getElementById('maxTokens').value = s.max_tokens || '4096';
+            document.getElementById('respondToAll').value = s.respond_to_all_private || 'true';
+        }
+
+        async function saveSettings() {
+            const data = {
+                api_base_url: document.getElementById('apiBaseUrl').value,
+                default_model: document.getElementById('defaultModel').value,
+                system_prompt: document.getElementById('systemPrompt').value,
+                max_tokens: document.getElementById('maxTokens').value,
+                respond_to_all_private: document.getElementById('respondToAll').value,
+            };
+            const key = document.getElementById('apiKey').value;
+            if (key) data.api_key = key;
+            await api('PUT', '/api/settings', data);
+            toast('Configurações salvas!');
+        }
+
+        async function savePassword() {
+            const pw = document.getElementById('panelPassword').value;
+            if (!pw) return toast('Digite uma nova senha', 'error');
+            await api('PUT', '/api/settings', { panel_password: pw });
+            token = pw;
+            localStorage.setItem('bot_token', pw);
+            document.getElementById('panelPassword').value = '';
+            toast('Senha alterada!');
+        }
+
+        async function testConnection() {
+            const el = document.getElementById('testResult');
+            el.innerHTML = '<span style="color:#888">Testando...</span>';
+            const res = await api('POST', '/api/test-connection');
+            if (res.success) {
+                el.innerHTML = `<span style="color:#25d366">✅ ${res.message}</span><br><small style="color:#888">Modelos: ${res.models?.join(', ')}</small>`;
+            } else {
+                el.innerHTML = `<span style="color:#e74c3c">❌ ${res.message}</span>`;
+            }
+        }
+
+        async function loadStats() {
+            const s = await api('GET', '/api/stats');
+            document.getElementById('statTotal').textContent = s.total_messages;
+            document.getElementById('statToday').textContent = s.today_messages;
+            document.getElementById('statAllowed').textContent = s.allowed_users;
+            document.getElementById('statBlocked').textContent = s.blocked_users;
+        }
+
+        async function loadUsers() {
+            const allowed = await api('GET', '/api/allowed-users');
+            const blocked = await api('GET', '/api/blocked-users');
+            document.getElementById('allowedList').innerHTML = allowed.map(u => `
+                <li class="user-item">
+                    <div class="info"><div class="phone">${u.phone}</div><div class="name">${u.name}</div><div class="date">${u.added_at}</div></div>
+                    <button class="btn btn-danger btn-sm" onclick="removeAllowed('${u.phone}')">Remover</button>
+                </li>`).join('') || '<li style="color:#666;padding:10px;">Nenhum usuário permitido</li>';
+            document.getElementById('blockedList').innerHTML = blocked.map(u => `
+                <li class="user-item">
+                    <div class="info"><div class="phone">${u.phone}</div><div class="name">${u.name}</div><div class="date">${u.added_at}</div></div>
+                    <button class="btn btn-secondary btn-sm" onclick="removeBlocked('${u.phone}')">Desbloquear</button>
+                </li>`).join('') || '<li style="color:#666;padding:10px;">Nenhum usuário bloqueado</li>';
+        }
+
+        async function addAllowedUser() {
+            const phone = document.getElementById('allowPhone').value.trim();
+            const name = document.getElementById('allowName').value.trim();
+            if (!phone) return toast('Informe o número', 'error');
+            await api('POST', '/api/allowed-users', { phone, name });
+            document.getElementById('allowPhone').value = '';
+            document.getElementById('allowName').value = '';
+            loadUsers(); loadStats();
+            toast('Usuário adicionado!');
+        }
+
+        async function removeAllowed(phone) {
+            await api('DELETE', `/api/allowed-users/${phone}`);
+            loadUsers(); loadStats();
+        }
+
+        async function addBlockedUser() {
+            const phone = document.getElementById('blockPhone').value.trim();
+            const name = document.getElementById('blockName').value.trim();
+            if (!phone) return toast('Informe o número', 'error');
+            await api('POST', '/api/blocked-users', { phone, name });
+            document.getElementById('blockPhone').value = '';
+            document.getElementById('blockName').value = '';
+            loadUsers(); loadStats();
+            toast('Usuário bloqueado!');
+        }
+
+        async function removeBlocked(phone) {
+            await api('DELETE', `/api/blocked-users/${phone}`);
+            loadUsers(); loadStats();
+        }
+
+        async function loadGroups() {
+            const groups = await api('GET', '/api/groups');
+            document.getElementById('groupsList').innerHTML = groups.map(g => `
+                <div class="group-item">
+                    <div class="info"><div class="phone">${g.group_name || g.group_id}</div><div class="name">${g.group_id}</div></div>
+                    <div style="display:flex;gap:15px;align-items:center;">
+                        <label style="color:#888;font-size:0.85rem;display:flex;align-items:center;gap:5px;">
+                            Exigir menção
+                            <label class="toggle"><input type="checkbox" ${g.require_mention ? 'checked' : ''} onchange="updateGroup('${g.group_id}','${g.group_name}',this.checked,null)"><span class="slider"></span></label>
+                        </label>
+                        <label style="color:#888;font-size:0.85rem;display:flex;align-items:center;gap:5px;">
+                            Ativo
+                            <label class="toggle"><input type="checkbox" ${g.enabled ? 'checked' : ''} onchange="updateGroup('${g.group_id}','${g.group_name}',null,this.checked)"><span class="slider"></span></label>
+                        </label>
+                    </div>
+                </div>`).join('') || '<p style="color:#666;padding:10px;">Nenhum grupo registrado ainda</p>';
+        }
+
+        async function updateGroup(id, name, requireMention, enabled) {
+            await api('PUT', `/api/groups/${encodeURIComponent(id)}`, { groupName: name, requireMention, enabled });
+        }
+
+        async function loadMessages() {
+            const msgs = await api('GET', '/api/messages?limit=100');
+            document.getElementById('messageLog').innerHTML = msgs.map(m => `
+                <div class="log-item">
+                    <div class="header"><span class="sender">${m.sender_name || m.sender} ${m.is_group ? '(grupo)' : ''}</span><span class="time">${m.timestamp}</span></div>
+                    <div class="msg">📨 ${m.message?.substring(0, 200)}</div>
+                    <div class="resp">🤖 ${m.response?.substring(0, 200)}</div>
+                    <div style="color:#555;font-size:0.75rem;margin-top:4px;">Modelo: ${m.model_used}</div>
+                </div>`).join('') || '<p style="color:#666;padding:10px;">Nenhuma mensagem registrada</p>';
+        }
+
+        async function loadStatus() {
+            const s = await api('GET', '/api/status');
+            const badge = document.getElementById('connectionStatus');
+            const container = document.getElementById('qrContainer');
+            if (s.connected) {
+                badge.className = 'status-badge status-connected';
+                badge.textContent = 'Conectado';
+                container.innerHTML = '<p style="color:#25d366;font-size:1.2rem;">✅ WhatsApp conectado!</p>';
+            } else if (s.status === 'qr_pending' && s.qrCode) {
+                badge.className = 'status-badge status-qr';
+                badge.textContent = 'Aguardando QR Code';
+                container.innerHTML = `<p style="margin-bottom:15px;color:#888;">Escaneie com seu WhatsApp:</p><img src="/api/qr-image?t=${Date.now()}" alt="QR Code" style="border-radius:12px;background:#fff;padding:10px;">`;
+            } else {
+                badge.className = 'status-badge status-disconnected';
+                badge.textContent = 'Desconectado';
+                container.innerHTML = '<p style="color:#888;">Bot desconectado. Inicie o bot para gerar o QR Code.</p>';
+            }
+        }
+
+        // Auto-refresh status every 5 seconds
+        setInterval(() => { if (token) loadStatus(); }, 5000);
+
+        // Check if already logged in
+        if (token) {
+            document.getElementById('loginScreen').style.display = 'none';
+            document.getElementById('app').style.display = 'block';
+            loadAll();
+        }
+    </script>
+</body>
+</html>
