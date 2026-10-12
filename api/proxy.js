@@ -36,8 +36,8 @@ export default async function handler(req, res) {
     const response = await fetch(targetUrl, fetchOpts);
     const contentType = response.headers.get('content-type') || '';
 
-    // For binary content (images like QR code PNG), pipe the buffer directly
-    if (contentType.includes('image/') || contentType.includes('octet-stream')) {
+    // For binary content (images, audio, octet-stream), pipe the buffer directly
+    if (contentType.includes('image/') || contentType.includes('audio/') || contentType.includes('octet-stream') || contentType.includes('application/pdf')) {
       const buffer = Buffer.from(await response.arrayBuffer());
       res.setHeader('Content-Type', contentType);
       res.setHeader('Cache-Control', 'no-cache');
