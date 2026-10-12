@@ -556,8 +556,14 @@ async function testRemoteConnection() {
   const el = document.getElementById('remoteTestResult');
   el.innerHTML = '<span style="color:#888">Testando conexão com VPS...</span>';
   try {
-    const url = document.getElementById('vpsUrl').value.trim().replace(/\/$/, '') + '/api/health';
-    const res = await fetch(url, { headers: { 'X-API-Token': document.getElementById('apiToken').value.trim() } });
+    const vpsUrl = document.getElementById('vpsUrl').value.trim();
+    const apiTok = document.getElementById('apiToken').value.trim();
+    // Use Vercel proxy to avoid Mixed Content (HTTPS page → HTTP VPS)
+    const res = await fetch('/api/proxy', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vpsUrl, apiToken: apiTok, path: '/api/health', method: 'GET' })
+    });
     const data = await res.json();
     if (data.ok) {
       el.innerHTML = `<span style="color:#25d366">✅ Conectado à VPS! Status: ${data.status}</span>`;
