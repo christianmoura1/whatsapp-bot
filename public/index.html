@@ -206,7 +206,11 @@ h2 { color: #fff; margin-bottom: 15px; font-size: 1.3rem; border-bottom: 1px sol
 <option value="true">Sim — sempre responder com áudio</option>
 </select>
 </div>
+<div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
 <button class="btn btn-primary" onclick="saveSettings()">Salvar Configurações</button>
+<button class="btn btn-secondary" onclick="testAudio()">🔊 Testar Áudio</button>
+</div>
+<div id="audioTestResult" style="margin-top:10px;"></div>
 </div>
 <div class="card">
 <h2>📄 Orçamento PDF</h2>
@@ -468,6 +472,36 @@ async function testConnection() {
     el.innerHTML = `<span style="color:#25d366">✅ ${res.message}</span><br><small style="color:#888">Modelos: ${res.models?.join(', ')}</small>`;
   } else {
     el.innerHTML = `<span style="color:#e74c3c">❌ ${res.message || res.error}</span>`;
+  }
+}
+
+async function testAudio() {
+  const el = document.getElementById('audioTestResult');
+  if (!el) return;
+  el.innerHTML = '<span style="color:#888">🔊 Gerando áudio de teste...</span>';
+  try {
+    let audioUrl;
+    if (isVercelHost() && remoteApiUrl) {
+      // Route through Vercel proxy for remote access
+      const res = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ vpsUrl: remoteApiUrl, apiToken: remoteApiToken, path: '/api/test-audio', method: 'GET' })
+      });
+      if (!res.ok) {
+        const errText = await res.text().catch(() => '');
+        el.innerHTML = `<span style="color:#e74c3c">❌ HTTP ${res.status}: ${errText.substring(0, 200)}</span>`;
+        return;
+      }
+      const blob = await res.blob();
+      audioUrl = URL.createObjectURL(blob);
+    } else {
+      // Local access — direct URL with cache-buster
+      audioUrl = '/api/test-audio?t=' + Date.now();
+    }
+    el.innerHTML = `<span style="color:#25d366">✅ Áudio gerado!</span><br><audio controls autoplay src="${audioUrl}" style="margin-top:8px;width:100%;max-width:400px;"></audio>`;
+  } catch (e) {
+    el.innerHTML = `<span style="color:#e74c3c">❌ Erro: ${e.message}</span>`;
   }
 }
 

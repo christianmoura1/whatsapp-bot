@@ -242,6 +242,20 @@ app.get('/api/qr-image', async (req, res) => {
   }
 });
 
+// ─── Test audio (TTS) ──────────────────────────────────────────────
+app.get('/api/test-audio', async (req, res) => {
+  try {
+    const { textToSpeech } = await import('./audio');
+    const testText = 'Olá! Este é um teste de áudio do WhatsApp Bot. Se você está ouvindo esta mensagem, a síntese de voz está funcionando corretamente.';
+    const audioPath = await textToSpeech(testText, 'test_' + Date.now());
+    res.set('Content-Type', 'audio/mpeg');
+    res.set('Cache-Control', 'no-cache');
+    res.sendFile(path.resolve(audioPath));
+  } catch (err: any) {
+    res.status(500).json({ error: `Erro ao gerar áudio de teste: ${err.message}` });
+  }
+});
+
 // ─── Health check ───────────────────────────────────────────────────
 app.get('/api/health', (req, res) => {
   res.json({ ok: true, status: connectionStatus, timestamp: new Date().toISOString() });
