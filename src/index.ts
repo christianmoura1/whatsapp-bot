@@ -136,6 +136,18 @@ async function connectToWhatsApp() {
         msg.message?.extendedTextMessage?.text ||
         '';
 
+      // ─── Group gate: by default the bot stays SILENT in every group.
+      // It only responds in a group when that group is explicitly registered
+      // in the `groups` table with enabled = 1 (configured via the panel's
+      // "👨‍👩‍‍👦 Grupos" tab). Any unregistered group — like "Líderes Man.Reg SUL"
+      // before you add it — is ignored entirely (text, audio, and images).
+      if (isGroup) {
+        const groupCfg = getGroupSettings(sender);
+        if (!groupCfg || !groupCfg.enabled) {
+          continue;
+        }
+      }
+
       // Detect audio messages (voice notes or audio files)
       const hasAudio = !!(msg.message?.audioMessage);
       // Detect image messages (photos sent by the user)
@@ -150,6 +162,7 @@ async function connectToWhatsApp() {
         // Permission check: same rules as text messages
         let canProcessImage = false;
         if (isGroup) {
+          // Group already passed the gate above, so groupCfg is enabled here.
           const groupSettingsImg = getGroupSettings(sender) || { require_mention: 1, enabled: 1 };
           if (groupSettingsImg.enabled && !isUserBlocked(senderJidImg)) {
             const isMentionedImg = !!(msg.message?.imageMessage?.caption || text.trim().length > 0);
