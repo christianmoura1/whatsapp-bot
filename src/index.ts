@@ -9,7 +9,7 @@ import { Boom } from '@hapi/boom';
 import qrcode from 'qrcode-terminal';
 import path from 'path';
 import fs from 'fs';
-import { chatCompletion } from './ai';
+import { chatCompletion, analyzeImage } from './ai';
 import {
   initDb,
   isUserAllowed,
@@ -20,6 +20,7 @@ import {
   getGroupSettings,
   setGroupSettings,
   addAllowedUser,
+  listRemindersForUser,
 } from './db';
 import { startPanel, setQrCode, setConnectionStatus } from './panel';
 import { transcribeAudio, textToSpeech, downloadMedia, saveAudioBuffer } from './audio';
@@ -33,6 +34,14 @@ import {
   formatTriggerReply,
   formatStatusReply,
 } from './commands';
+import {
+  createReminder,
+  cancelReminder,
+  formatCreatedReply,
+  formatListReply,
+  initScheduler as initReminderScheduler,
+  registerReminderDeliverer,
+} from './reminders';
 
 const AUTH_DIR = path.join(__dirname, '..', 'auth');
 
@@ -98,6 +107,16 @@ async function connectToWhatsApp() {
       console.log('✅ WhatsApp conectado com sucesso!');
       setConnectionStatus('connected');
       setQrCode(null);
+      // Register the reminder deliverer so the scheduler can send messages via this socket,
+      // then load all saved reminders and arm their cron jobs.
+      try {
+        registerReminderDeliverer(async (userJid, text) => {
+          await sock.sendMessage(userJid, { text });
+        });
+        initReminderScheduler();
+      } catch (e: any) {
+        console.error('⚠️ Falha ao inicializar scheduler de lembretes:', e?.message || e);
+      }
     }
   });
 
@@ -119,9 +138,53 @@ async function connectToWhatsApp() {
 
       // Detect audio messages (voice notes or audio files)
       const hasAudio = !!(msg.message?.audioMessage);
+      // Detect image messages (photos sent by the user)
+      const hasImage = !!(msg.message?.imageMessage);
       let messageToProcess = text;
       let isAudioMessage = false;
       let audioResponsePath: string | null = null;
+
+      // ─── Image analysis: if user sent a photo, analyze it with vision model ───
+      if (hasImage) {
+        const senderJidImg = isGroup ? (msg.key.participant || '') : sender;
+        // Permission check: same rules as text messages
+        let canProcessImage = false;
+        if (isGroup) {
+          const groupSettingsImg = getGroupSettings(sender) || { require_mention: 1, enabled: 1 };
+          if (groupSettingsImg.enabled && !isUserBlocked(senderJidImg)) {
+            const isMentionedImg = !!(msg.message?.imageMessage?.caption || text.trim().length > 0);
+            canProcessImage = !groupSettingsImg.require_mention || isMentionedImg;
+          }
+        } else {
+          if (!isUserBlocked(senderJidImg)) {
+            const respondToAllImg = getSetting('respond_to_all_private') === 'true';
+            canProcessImage = respondToAllImg || isUserAllowed(senderJidImg);
+          }
+        }
+        if (canProcessImage) {
+          console.log(`🖼️ [${isGroup ? 'Grupo' : 'Privado'}] ${senderName} (${sender}): [Imagem recebida, analisando...]`);
+          try {
+            const media = await downloadMedia(msg, sock);
+            if (media) {
+              const userQuestion = text.trim() || undefined;
+              const description = await analyzeImage(media.buffer, media.mimeType, userQuestion);
+              await sock.sendMessage(sender, { text: `🖼️ *Análise da imagem:*\n\n${description}` }, {
+                quoted: isGroup ? msg : undefined,
+              });
+              const senderPhoneImg = (msg.key.participant || sender).replace('@s.whatsapp.net', '');
+              logMessage(senderPhoneImg, senderName, `[Imagem enviada] ${text || '(sem legenda)'}`, description, 'claude-sonnet-5-vision', isGroup, isGroup ? sender : undefined);
+              console.log(`🖼️ Análise enviada para ${senderName}`);
+              continue;
+            } else {
+              console.log('⚠️ Não foi possível baixar a imagem');
+            }
+          } catch (imgErr: any) {
+            console.error('❌ Erro ao analisar imagem:', imgErr.message);
+            await sock.sendMessage(sender, { text: `⚠️ Erro ao analisar imagem: ${imgErr.message}` });
+            continue;
+          }
+        }
+      }
 
       if (hasAudio && !text.trim()) {
         // Audio message without caption — transcribe it
@@ -285,6 +348,39 @@ async function connectToWhatsApp() {
             await sock.sendMessage(sender, { text: formatTriggerReply(cmd, result) });
             continue;
           }
+        }
+
+        // ─── Reminder commands (any allowed user) ─────────────────────────
+        // /lembrete <texto natural> → create a reminder
+        const lembreteMatch = text.trim().match(/^\/lembrete\s+([\s\S]+)$/i);
+        if (lembreteMatch) {
+          const userText = lembreteMatch[1].trim();
+          await sock.sendMessage(sender, { text: '⏳ Interpretando seu lembrete...' });
+          const row = await createReminder(senderJid, userText);
+          if (row) {
+            await sock.sendMessage(sender, { text: formatCreatedReply(row) });
+          } else {
+            await sock.sendMessage(sender, { text: '⚠️ Não consegui entender o lembrete. Tente algo como: "/lembrete amanhã às 14h ligar pro cliente" ou "/lembrete toda sexta às 17h enviar relatório".' });
+          }
+          continue;
+        }
+        // /lembretes → list my reminders
+        if (/^\/lembretes?$/i.test(text.trim())) {
+          const rows = listRemindersForUser(senderJid);
+          await sock.sendMessage(sender, { text: formatListReply(rows) });
+          continue;
+        }
+        // /cancelar <id> → cancel a reminder
+        const cancelarMatch = text.trim().match(/^\/cancelar\s+(\d+)\s*$/i);
+        if (cancelarMatch) {
+          const id = parseInt(cancelarMatch[1], 10);
+          const ok = cancelReminder(id, senderJid);
+          if (ok) {
+            await sock.sendMessage(sender, { text: `✅ Lembrete *#${id}* cancelado.` });
+          } else {
+            await sock.sendMessage(sender, { text: `⚠️ Lembrete *#${id}* não encontrado ou não pertence a você.` });
+          }
+          continue;
         }
       }
 

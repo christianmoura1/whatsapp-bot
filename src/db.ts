@@ -278,6 +278,106 @@ export function getAllAdmins(): { jid: string; name: string; added_at: string }[
   }));
 }
 
+// ─── Reminders ────────────────────────────────────────────────────────────
+// Table created lazily on first access so existing DBs work without migration.
+export interface ReminderRow {
+  id: number;
+  user_jid: string;
+  message: string;
+  cron_expression: string;
+  next_run: string;
+  created_at: string;
+  is_recurring: boolean;
+}
+
+function ensureRemindersTable(): void {
+  getDb().run(`
+    CREATE TABLE IF NOT EXISTS reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_jid TEXT NOT NULL,
+      message TEXT NOT NULL,
+      cron_expression TEXT NOT NULL,
+      next_run TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      is_recurring INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+}
+
+export function addReminderRow(
+  userJid: string,
+  message: string,
+  cronExpression: string,
+  nextRunISO: string,
+  isRecurring: boolean
+): ReminderRow {
+  ensureRemindersTable();
+  const createdAt = new Date().toISOString();
+  getDb().run(
+    'INSERT INTO reminders (user_jid, message, cron_expression, next_run, created_at, is_recurring) VALUES (?, ?, ?, ?, ?, ?)',
+    [userJid, message, cronExpression, nextRunISO, createdAt, isRecurring ? 1 : 0]
+  );
+  saveDb();
+  const lastIdResult = getDb().exec('SELECT last_insert_rowid()');
+  const id = (lastIdResult[0]?.values[0]?.[0] ?? 0) as number;
+  return {
+    id,
+    user_jid: userJid,
+    message,
+    cron_expression: cronExpression,
+    next_run: nextRunISO,
+    created_at: createdAt,
+    is_recurring: isRecurring,
+  };
+}
+
+export function removeReminderRow(id: number): void {
+  ensureRemindersTable();
+  getDb().run('DELETE FROM reminders WHERE id = ?', [id]);
+  saveDb();
+}
+
+export function updateReminderNextRun(id: number, nextRunISO: string): void {
+  ensureRemindersTable();
+  getDb().run('UPDATE reminders SET next_run = ? WHERE id = ?', [nextRunISO, id]);
+  saveDb();
+}
+
+export function listRemindersForUser(userJid: string): ReminderRow[] {
+  ensureRemindersTable();
+  const result = getDb().exec(
+    'SELECT id, user_jid, message, cron_expression, next_run, created_at, is_recurring FROM reminders WHERE user_jid = ? ORDER BY next_run ASC',
+    [userJid]
+  );
+  if (result.length === 0) return [];
+  return result[0].values.map((row: any[]) => ({
+    id: row[0],
+    user_jid: row[1],
+    message: row[2],
+    cron_expression: row[3],
+    next_run: row[4],
+    created_at: row[5],
+    is_recurring: row[6] === 1,
+  }));
+}
+
+export function listAllReminders(): ReminderRow[] {
+  ensureRemindersTable();
+  const result = getDb().exec(
+    'SELECT id, user_jid, message, cron_expression, next_run, created_at, is_recurring FROM reminders ORDER BY next_run ASC'
+  );
+  if (result.length === 0) return [];
+  return result[0].values.map((row: any[]) => ({
+    id: row[0],
+    user_jid: row[1],
+    message: row[2],
+    cron_expression: row[3],
+    next_run: row[4],
+    created_at: row[5],
+    is_recurring: row[6] === 1,
+  }));
+}
+
 export function getStats(): { total_messages: number; today_messages: number; allowed_users: number; blocked_users: number } {
   const totalResult = getDb().exec('SELECT COUNT(*) FROM message_log');
   const todayResult = getDb().exec("SELECT COUNT(*) FROM message_log WHERE date(timestamp) = date('now')");
