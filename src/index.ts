@@ -482,10 +482,15 @@ async function connectToWhatsApp() {
         }
 
         // Generate and send audio response (OGG/Opus for WhatsApp mobile PTT compatibility)
-        if ((replyWithAudioOnly || replyWithAudioAlso) && response.length < 500) {
+        // When input was audio (replyWithAudioOnly), ALWAYS reply with audio regardless of length.
+        // For auto_reply_audio on text input, keep the 500-char limit to avoid long TTS generation.
+        const shouldGenerateAudio = replyWithAudioOnly || (replyWithAudioAlso && response.length < 500);
+        if (shouldGenerateAudio) {
           try {
             console.log(`🔊 Gerando resposta em áudio para ${senderName}...`);
-            const ttsPath = await textToSpeech(response, msg.key.id || 'unknown');
+            // Truncate text for TTS if too long (TTS services have limits), but still generate audio
+            const textForTTS = response.length > 1000 ? response.substring(0, 997) + '...' : response;
+            const ttsPath = await textToSpeech(textForTTS, msg.key.id || 'unknown');
             const isOgg = ttsPath.toLowerCase().endsWith('.ogg');
             await sock.sendMessage(sender, {
               audio: fs.readFileSync(ttsPath),
