@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import path from 'path';
+import crypto from 'crypto';
 import QRCode from 'qrcode';
 import {
   getAllSettings,
@@ -33,14 +34,9 @@ app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (curl, mobile apps, same-origin)
     if (!origin) return callback(null, true);
-    if (ALLOWED_ORIGINS.some(o => origin.startsWith(o))) {
-      return callback(null, true);
-    }
-    // Also allow any vercel.app subdomain for this project
-    if (origin.endsWith('.vercel.app')) {
-      return callback(null, true);
-    }
-    callback(null, true); // permissive for now; tighten later if needed
+    // O painel da Vercel fala com a VPS pelo proxy (server-side, sem origin);
+    // navegador de outra origem nao tem por que chamar esta API direto.
+    callback(null, ALLOWED_ORIGINS.includes(origin));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -59,33 +55,45 @@ function getRemoteToken(): string {
   let token = getSetting('remote_api_token');
   if (!token) {
     // Generate a random token on first use
-    token = 'wabot_' + Math.random().toString(36).substring(2) + Date.now().toString(36);
+    token = 'wabot_' + crypto.randomBytes(24).toString('base64url');
     setSetting('remote_api_token', token);
   }
   return token;
 }
 
+// Comparacao em tempo constante (nao vaza o segredo pelo tempo de resposta).
+function igual(a: string | undefined, b: string): boolean {
+  if (!a || !b) return false;
+  const x = Buffer.from(a);
+  const y = Buffer.from(b);
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+}
+
+function ehLocal(req: express.Request): boolean {
+  const ip = req.socket.remoteAddress || '';
+  return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
+// Sem senha definida o painel fica fechado. Antes caia no padrao 'admin123'.
+function senhaDoPainel(): string {
+  return getSetting('panel_password') || '';
+}
+
 // ─── Auth middleware ────────────────────────────────────────────────
+// Duas camadas, ambas obrigatorias:
+//   1. de fora da maquina, so' o proxy da Vercel entra (X-API-Token);
+//   2. em toda rota, exceto o proprio login, a senha do painel (Bearer).
+// Antes o token sozinho liberava tudo, e /qr-image nao pedia nada -- quem
+// pegasse o QR pareava o WhatsApp do bot no aparelho dele.
 function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
-  const password = getSetting('panel_password') || 'admin123';
-  const remoteToken = getRemoteToken();
-  const authHeader = req.headers.authorization;
-  const apiTokenHeader = req.headers['x-api-token'] as string | undefined;
-
-  // Allow login endpoint without auth
-  if (req.path === '/login' || req.path === '/qr-image') {
-    return next();
+  if (!ehLocal(req) && !igual(req.headers['x-api-token'] as string | undefined, getRemoteToken())) {
+    return res.status(401).json({ error: 'Não autorizado' });
   }
 
-  // Check remote API token (for Vercel panel → VPS communication)
-  if (apiTokenHeader && apiTokenHeader === remoteToken) {
-    return next();
-  }
+  if (req.path === '/login') return next();
 
-  // Check local panel password (Bearer token)
-  if (authHeader && authHeader === `Bearer ${password}`) {
-    return next();
-  }
+  const authHeader = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  if (igual(authHeader, senhaDoPainel())) return next();
 
   return res.status(401).json({ error: 'Não autorizado' });
 }
@@ -95,23 +103,15 @@ app.use('/api', authMiddleware);
 // ─── Login ──────────────────────────────────────────────────────────
 app.post('/api/login', (req, res) => {
   const { password } = req.body;
-  const storedPassword = getSetting('panel_password') || 'admin123';
-  if (password === storedPassword) {
+  const storedPassword = senhaDoPainel();
+  if (igual(String(password ?? ''), storedPassword)) {
     res.json({ success: true, token: storedPassword });
   } else {
     res.status(401).json({ error: 'Senha incorreta' });
   }
 });
 
-// ─── Remote API info (for Vercel panel to discover the token) ──────
-app.get('/api/remote-info', (req, res) => {
-  const remoteToken = getRemoteToken();
-  res.json({
-    remote_api_token: remoteToken,
-    vps_url: `http://${req.hostname}:3456`,
-    message: 'Use este token no campo "API Token" do painel remoto (Vercel)',
-  });
-});
+// /api/remote-info foi removido: entregava o token a quem pedisse.
 
 // ─── Settings ──────────────────────────────────────────────────────
 app.get('/api/settings', (req, res) => {
@@ -119,8 +119,9 @@ app.get('/api/settings', (req, res) => {
   if (settings.api_key && settings.api_key.length > 8) {
     settings.api_key_masked = settings.api_key.substring(0, 4) + '****' + settings.api_key.substring(settings.api_key.length - 4);
   }
-  // Don't expose remote_api_token in plain settings response
+  // Don't expose remote_api_token or the panel password in the settings response
   delete (settings as any).remote_api_token;
+  delete (settings as any).panel_password;
   res.json(settings);
 });
 
@@ -128,6 +129,9 @@ app.put('/api/settings', (req, res) => {
   const updates = req.body;
   for (const [key, value] of Object.entries(updates)) {
     if (typeof value === 'string') {
+      // O token do proxy so' muda na VPS; senha vazia nao apaga a atual.
+      if (key === 'remote_api_token') continue;
+      if (key === 'panel_password' && value.trim().length < 12) continue;
       setSetting(key, value);
     }
   }
@@ -268,8 +272,8 @@ const PORT = parseInt(process.env.PANEL_PORT || '3456', 10);
 export function startPanel() {
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🌐 Painel de administração rodando em http://localhost:${PORT}`);
-    console.log(`🔑 Token da API remota: ${getRemoteToken()}`);
-    console.log(`   Use este token no painel da Vercel para controlar o bot remotamente.`);
+    // O token nao vai mais para o console/log: ele so' existe no banco e na Vercel.
+    getRemoteToken();
   });
 }
 

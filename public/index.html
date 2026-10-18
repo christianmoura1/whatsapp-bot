@@ -77,34 +77,15 @@ h2 { color: #fff; margin-bottom: 15px; font-size: 1.3rem; border-bottom: 1px sol
 </style>
 </head>
 <body>
-<!-- Remote Setup Screen (shown first on Vercel) -->
-<div id="remoteSetupScreen" class="login-screen" style="display:none;">
-<div class="login-card" style="max-width:500px;">
-<h1>🌐 Conexão Remota</h1>
-<p style="color:#888; margin-bottom:20px;">Configure a conexão com a VPS para controlar o bot remotamente.</p>
-<div class="form-group">
-<label style="color:#aaa; font-size:0.9rem; display:block; margin-bottom:5px;">URL da VPS</label>
-<input type="text" id="setupVpsUrl" placeholder="http://154.64.32.227:3456" value="http://154.64.32.227:3456">
-</div>
-<div class="form-group">
-<label style="color:#aaa; font-size:0.9rem; display:block; margin-bottom:5px;">API Token</label>
-<input type="text" id="setupApiToken" placeholder="wabot_..." value="wabot_rh987u3v7ajmv5gthdb">
-</div>
-<div class="form-group">
-<label style="color:#aaa; font-size:0.9rem; display:block; margin-bottom:5px;">Senha do Painel</label>
-<input type="password" id="setupPassword" placeholder="admin123" value="admin123">
-</div>
-<button class="btn btn-primary" style="width:100%" onclick="doRemoteSetup()">Conectar à VPS</button>
-<div id="setupResult" style="margin-top:10px;"></div>
-</div>
-</div>
-<!-- Login Screen (for local access) -->
+<!-- Login Screen. A URL da VPS e o token ficam no servidor (proxy da Vercel),
+     nunca no navegador: aqui so' se pede a senha do painel. -->
 <div id="loginScreen" class="login-screen">
 <div class="login-card">
 <h1>🤖 WhatsApp Bot</h1>
 <p style="color:#888; margin-bottom:25px;">Painel de Administração</p>
-<div class="form-group">
-<input type="password" id="loginPassword" placeholder="Senha de acesso" onkeypress="if(event.key==='Enter')doLogin()">
+<div class="form-group" style="display:flex; gap:8px;">
+<input type="password" id="loginPassword" placeholder="Senha de acesso" autocomplete="current-password" onkeypress="if(event.key==='Enter')doLogin()" style="flex:1">
+<button type="button" class="btn btn-secondary btn-sm" onclick="toggleSenha()" title="Mostrar/ocultar senha">👁</button>
 </div>
 <button class="btn btn-primary" style="width:100%" onclick="doLogin()">Entrar</button>
 </div>
@@ -118,22 +99,6 @@ h2 { color: #fff; margin-bottom: 15px; font-size: 1.3rem; border-bottom: 1px sol
 <span id="connectionStatus" class="status-badge status-disconnected">Desconectado</span>
 <button class="btn btn-secondary btn-sm" style="margin-left:10px" onclick="logout()">Sair</button>
 </div>
-</div>
-<!-- Remote API Config (for Vercel panel) -->
-<div class="card remote-config" id="remoteConfigCard" style="display:none;">
-<h2>🌐 Conexão Remota (VPS)</h2>
-<p style="color:#888; margin-bottom:10px; font-size:0.9rem;">Para controlar o bot na VPS a partir da Vercel, configure a URL da VPS e o token da API.</p>
-<div class="form-group">
-<label>URL da VPS (ex: http://seu-ip:3456)</label>
-<input type="text" id="vpsUrl" placeholder="http://localhost:3456">
-</div>
-<div class="form-group">
-<label>API Token (gerado pela VPS)</label>
-<input type="password" id="apiToken" placeholder="wabot_...">
-</div>
-<button class="btn btn-primary btn-sm" onclick="saveRemoteConfig()">Salvar Conexão Remota</button>
-<button class="btn btn-secondary btn-sm" onclick="testRemoteConnection()">Testar Conexão</button>
-<div id="remoteTestResult" style="margin-top:10px;"></div>
 </div>
 <!-- Stats -->
 <div class="stats-grid">
@@ -293,43 +258,54 @@ h2 { color: #fff; margin-bottom: 15px; font-size: 1.3rem; border-bottom: 1px sol
 </div>
 </div>
 <script>
-let token = localStorage.getItem('bot_token') || '';
-let remoteApiUrl = localStorage.getItem('bot_remote_url') || '';
-let remoteApiToken = localStorage.getItem('bot_remote_token') || '';
+// Sessao so' nesta aba (sessionStorage): fechou, saiu. As chaves antigas do
+// localStorage (URL da VPS, token, senha) sao apagadas na carga.
+['bot_token', 'bot_remote_url', 'bot_remote_token'].forEach(k => { try { localStorage.removeItem(k); } catch (e) {} });
+let token = '';
+try { token = sessionStorage.getItem('bot_token') || ''; } catch (e) {}
+function guardarToken(t) { token = t || ''; try { t ? sessionStorage.setItem('bot_token', t) : sessionStorage.removeItem('bot_token'); } catch (e) {} }
 
-// Determine if we need to use the Vercel proxy (HTTPS page → HTTP VPS)
+// Na Vercel tudo passa pelo proxy (/api/proxy), que conhece a VPS e o token
+// pelas variaveis de ambiente do servidor. O navegador manda so' a senha.
 function isVercelHost() {
   return window.location.hostname.endsWith('.vercel.app');
 }
 
-async function api(method, path, body) {
+function montarRequisicao(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  let url;
-
-  if (isVercelHost() && remoteApiUrl) {
-    // Route through Vercel serverless proxy to avoid Mixed Content
-    url = '/api/proxy';
+  if (token) opts.headers['Authorization'] = `Bearer ${token}`;
+  if (isVercelHost()) {
     opts.method = 'POST';
-    opts.body = JSON.stringify({
-      vpsUrl: remoteApiUrl,
-      apiToken: remoteApiToken,
-      path: '/api' + path,
-      method: method,
-      body: body || null
-    });
-  } else {
-    url = '/api' + path;
-    if (token) opts.headers['Authorization'] = `Bearer ${token}`;
-    if (body) opts.body = JSON.stringify(body);
+    opts.body = JSON.stringify({ path: '/api' + path, method, body: body || null });
+    return { url: '/api/proxy', opts };
   }
+  if (body) opts.body = JSON.stringify(body);
+  return { url: '/api' + path, opts };
+}
 
+async function api(method, path, body) {
+  const { url, opts } = montarRequisicao(method, path, body);
   try {
     const res = await fetch(url, opts);
+    if (res.status === 401 && path !== '/login') { logout(); return { error: 'Sessão expirada' }; }
     return res.json();
   } catch (e) {
     console.error('API call failed:', e);
     return { error: 'Conexão falhou' };
   }
+}
+
+// Conteudo binario (QR, audio): busca com autenticacao e vira URL local.
+async function apiBlob(path) {
+  const { url, opts } = montarRequisicao('GET', path);
+  const res = await fetch(url, opts);
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => '')).substring(0, 200)}`);
+  return URL.createObjectURL(await res.blob());
+}
+
+function toggleSenha() {
+  const el = document.getElementById('loginPassword');
+  el.type = el.type === 'password' ? 'text' : 'password';
 }
 
 function toast(msg, type = 'success') {
@@ -340,50 +316,12 @@ function toast(msg, type = 'success') {
   setTimeout(() => t.remove(), 3000);
 }
 
-async function doRemoteSetup() {
-  const url = document.getElementById('setupVpsUrl').value.trim();
-  const tok = document.getElementById('setupApiToken').value.trim();
-  const pw = document.getElementById('setupPassword').value.trim();
-  const el = document.getElementById('setupResult');
-  if (!url || !tok) { el.innerHTML = '<span style="color:#e74c3c">Preencha URL e Token</span>'; return; }
-  el.innerHTML = '<span style="color:#888">Testando conexão com VPS...</span>';
-  try {
-    // Use Vercel proxy to avoid Mixed Content (HTTPS page → HTTP VPS)
-    const proxyCall = async (apiPath, method, body) => {
-      const res = await fetch('/api/proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vpsUrl: url, apiToken: tok, path: apiPath, method: method || 'GET', body: body || null })
-      });
-      return res.json();
-    };
-    const health = await proxyCall('/api/health');
-    if (!health.ok) { el.innerHTML = '<span style="color:#e74c3c">❌ Token inválido ou VPS inacessível</span>'; return; }
-    // Test login via proxy
-    const loginData = await proxyCall('/api/login', 'POST', { password: pw });
-    if (!loginData.success) { el.innerHTML = '<span style="color:#e74c3c">❌ Senha incorreta</span>'; return; }
-    // Save config
-    remoteApiUrl = url;
-    remoteApiToken = tok;
-    token = loginData.token;
-    localStorage.setItem('bot_remote_url', url);
-    localStorage.setItem('bot_remote_token', tok);
-    localStorage.setItem('bot_token', token);
-    document.getElementById('remoteSetupScreen').style.display = 'none';
-    document.getElementById('app').style.display = 'block';
-    loadAll();
-    toast('✅ Conectado à VPS!');
-  } catch (e) {
-    el.innerHTML = `<span style="color:#e74c3c">❌ Falha: ${e.message}</span>`;
-  }
-}
-
 async function doLogin() {
   const pw = document.getElementById('loginPassword').value;
   const res = await api('POST', '/login', { password: pw });
   if (res.success) {
-    token = res.token;
-    localStorage.setItem('bot_token', token);
+    guardarToken(res.token);
+    document.getElementById('loginPassword').value = '';
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     loadAll();
@@ -393,8 +331,7 @@ async function doLogin() {
 }
 
 function logout() {
-  token = '';
-  localStorage.removeItem('bot_token');
+  guardarToken('');
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
 }
@@ -414,12 +351,6 @@ async function loadAll() {
   loadStats();
   loadUsers();
   loadStatus();
-  // Show remote config card if on Vercel
-  if (window.location.hostname.endsWith('.vercel.app')) {
-    document.getElementById('remoteConfigCard').style.display = 'block';
-    document.getElementById('vpsUrl').value = remoteApiUrl;
-    document.getElementById('apiToken').value = remoteApiToken;
-  }
 }
 
 async function loadSettings() {
@@ -457,9 +388,9 @@ async function saveSettings() {
 async function savePassword() {
   const pw = document.getElementById('panelPassword').value;
   if (!pw) return toast('Digite uma nova senha', 'error');
+  if (pw.trim().length < 12) return toast('Use pelo menos 12 caracteres', 'error');
   await api('PUT', '/settings', { panel_password: pw });
-  token = pw;
-  localStorage.setItem('bot_token', pw);
+  guardarToken(pw);
   document.getElementById('panelPassword').value = '';
   toast('Senha alterada!');
 }
@@ -480,25 +411,7 @@ async function testAudio() {
   if (!el) return;
   el.innerHTML = '<span style="color:#888">🔊 Gerando áudio de teste...</span>';
   try {
-    let audioUrl;
-    if (isVercelHost() && remoteApiUrl) {
-      // Route through Vercel proxy for remote access
-      const res = await fetch('/api/proxy', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ vpsUrl: remoteApiUrl, apiToken: remoteApiToken, path: '/api/test-audio', method: 'GET' })
-      });
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '');
-        el.innerHTML = `<span style="color:#e74c3c">❌ HTTP ${res.status}: ${errText.substring(0, 200)}</span>`;
-        return;
-      }
-      const blob = await res.blob();
-      audioUrl = URL.createObjectURL(blob);
-    } else {
-      // Local access — direct URL with cache-buster
-      audioUrl = '/api/test-audio?t=' + Date.now();
-    }
+    const audioUrl = await apiBlob('/test-audio?t=' + Date.now());
     el.innerHTML = `<span style="color:#25d366">✅ Áudio gerado!</span><br><audio controls autoplay src="${audioUrl}" style="margin-top:8px;width:100%;max-width:400px;"></audio>`;
   } catch (e) {
     el.innerHTML = `<span style="color:#e74c3c">❌ Erro: ${e.message}</span>`;
@@ -604,10 +517,9 @@ async function loadStatus() {
   } else if (s.status === 'qr_pending' && s.qrCode) {
     badge.className = 'status-badge status-qr';
     badge.textContent = 'Aguardando QR Code';
-    // Use proxy for QR image to avoid Mixed Content
-    const qrSrc = isVercelHost() && remoteApiUrl
-      ? `/api/proxy?vpsUrl=${encodeURIComponent(remoteApiUrl)}&apiToken=${encodeURIComponent(remoteApiToken)}&path=/api/qr-image&t=${Date.now()}`
-      : `/api/qr-image?t=${Date.now()}`;
+    // QR exige senha: vem por fetch autenticado, nunca por <img src> aberto.
+    let qrSrc = '';
+    try { qrSrc = await apiBlob(`/qr-image?t=${Date.now()}`); } catch (e) { console.error('QR falhou:', e); }
     container.innerHTML = `<p style="margin-bottom:15px;color:#888;">Escaneie com seu WhatsApp:</p><img src="${qrSrc}" alt="QR Code" style="border-radius:12px;background:#fff;padding:10px;">`;
   } else {
     badge.className = 'status-badge status-disconnected';
@@ -616,55 +528,14 @@ async function loadStatus() {
   }
 }
 
-// Remote config functions
-function saveRemoteConfig() {
-  const url = document.getElementById('vpsUrl').value.trim();
-  const tok = document.getElementById('apiToken').value.trim();
-  if (!url) return toast('Informe a URL da VPS', 'error');
-  if (!tok) return toast('Informe o API Token', 'error');
-  remoteApiUrl = url;
-  remoteApiToken = tok;
-  localStorage.setItem('bot_remote_url', url);
-  localStorage.setItem('bot_remote_token', tok);
-  toast('Configuração remota salva!');
-}
-
-async function testRemoteConnection() {
-  const el = document.getElementById('remoteTestResult');
-  el.innerHTML = '<span style="color:#888">Testando conexão com VPS...</span>';
-  try {
-    const vpsUrl = document.getElementById('vpsUrl').value.trim();
-    const apiTok = document.getElementById('apiToken').value.trim();
-    // Use Vercel proxy to avoid Mixed Content (HTTPS page → HTTP VPS)
-    const res = await fetch('/api/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ vpsUrl, apiToken: apiTok, path: '/api/health', method: 'GET' })
-    });
-    const data = await res.json();
-    if (data.ok) {
-      el.innerHTML = `<span style="color:#25d366">✅ Conectado à VPS! Status: ${data.status}</span>`;
-    } else {
-      el.innerHTML = `<span style="color:#e74c3c">❌ Erro: ${JSON.stringify(data)}</span>`;
-    }
-  } catch (e) {
-    el.innerHTML = `<span style="color:#e74c3c">❌ Falha na conexão: ${e.message}</span>`;
-  }
-}
-
 // Auto-refresh status every 5 seconds
 setInterval(() => { if (token) loadStatus(); }, 5000);
 
-// Check if already logged in or needs remote setup
-if (token && (remoteApiUrl || !isVercelHost())) {
+// Ja logado nesta aba? Senao fica na tela de senha.
+if (token) {
   document.getElementById('loginScreen').style.display = 'none';
-  document.getElementById('remoteSetupScreen').style.display = 'none';
   document.getElementById('app').style.display = 'block';
   loadAll();
-} else if (isVercelHost()) {
-  // On Vercel without config: show remote setup screen first
-  document.getElementById('loginScreen').style.display = 'none';
-  document.getElementById('remoteSetupScreen').style.display = 'flex';
 }
 </script>
 </body>
