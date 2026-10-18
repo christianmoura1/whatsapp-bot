@@ -120,27 +120,38 @@ export function getAllSettings(): Record<string, string> {
   return settings;
 }
 
+// Formas EXATAS pelas quais um remetente pode estar cadastrado. Nada de LIKE:
+// com '%jid%' um jid vazio virava '%%' e casava com qualquer linha da tabela.
+//   '236266302001184@lid'             -> ['236266302001184@lid']
+//   '5527998100110:12@s.whatsapp.net' -> ['5527998100110@s.whatsapp.net', '5527998100110']
+function identidades(jid: string): string[] {
+  const j = String(jid || '').trim().toLowerCase();
+  if (!j) return [];
+  const [usuario, dominio = ''] = j.split('@');
+  const u = usuario.split(':')[0];
+  if (!u) return [];
+  const formas = dominio ? [`${u}@${dominio}`] : [u];
+  if (dominio === 's.whatsapp.net' || dominio === 'c.us') formas.push(u);
+  return [...new Set(formas)];
+}
+
+function existeEm(tabela: string, coluna: string, jid: string): boolean {
+  const formas = identidades(jid);
+  if (formas.length === 0) return false;
+  const result = getDb().exec(
+    `SELECT 1 FROM ${tabela} WHERE lower(trim(${coluna})) IN (${formas.map(() => '?').join(', ')}) LIMIT 1`,
+    formas
+  );
+  return result.length > 0 && result[0].values.length > 0;
+}
+
 export function isUserAllowed(phone: string): boolean {
-  // Check blocked first — supports exact match and partial match for @lid vs @s.whatsapp.net
-  const blocked = getDb().exec(
-    'SELECT phone FROM blocked_users WHERE phone = ? OR phone LIKE ? OR ? LIKE phone',
-    [phone, `%${phone}%`, `%${phone}%`]
-  );
-  if (blocked.length > 0 && blocked[0].values.length > 0) return false;
-  // Check allowed — same flexible matching
-  const allowed = getDb().exec(
-    'SELECT phone FROM allowed_users WHERE phone = ? OR phone LIKE ? OR ? LIKE phone',
-    [phone, `%${phone}%`, `%${phone}%`]
-  );
-  return allowed.length > 0 && allowed[0].values.length > 0;
+  if (existeEm('blocked_users', 'phone', phone)) return false;
+  return existeEm('allowed_users', 'phone', phone);
 }
 
 export function isUserBlocked(phone: string): boolean {
-  const result = getDb().exec(
-    'SELECT phone FROM blocked_users WHERE phone = ? OR phone LIKE ? OR ? LIKE phone',
-    [phone, `%${phone}%`, `%${phone}%`]
-  );
-  return result.length > 0 && result[0].values.length > 0;
+  return existeEm('blocked_users', 'phone', phone);
 }
 
 export function addAllowedUser(phone: string, name?: string, isGroup: boolean = false): void {
@@ -247,12 +258,8 @@ function ensureAdminTable(): void {
 export function isAdmin(jid: string): boolean {
   if (!jid) return false;
   ensureAdminTable();
-  // Flexible match: exact JID, or partial (handles @lid vs @s.whatsapp.net and bare numbers)
-  const result = getDb().exec(
-    'SELECT jid FROM admin_users WHERE jid = ? OR jid LIKE ? OR ? LIKE jid',
-    [jid, `%${jid}%`, `%${jid}%`]
-  );
-  return result.length > 0 && result[0].values.length > 0;
+  // Match EXATO (LID completo, JID ou numero puro). Antes era trecho parcial.
+  return existeEm('admin_users', 'jid', jid);
 }
 
 export function addAdmin(jid: string, name?: string): void {

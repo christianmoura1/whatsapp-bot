@@ -148,6 +148,21 @@ async function connectToWhatsApp() {
         }
       }
 
+      // ─── Lista de autorizados (pedido do Christian em 18/10/2026): o bot so'
+      // responde a quem esta' em "usuarios permitidos" do painel, ou e' admin.
+      // Vale no privado E dentro de grupo autorizado (quem fala e' o participante).
+      // Roda ANTES de baixar/transcrever qualquer midia: estranho nao gasta
+      // Groq nem recebe nem mensagem de erro. "Responder a todos" foi desligado
+      // de proposito e o codigo nao le mais essa opcao.
+      {
+        const quemFala = isGroup ? (msg.key.participant || '') : sender;
+        const autorizado = !!quemFala && !isUserBlocked(quemFala) && (isUserAllowed(quemFala) || isAdmin(quemFala));
+        if (!autorizado) {
+          console.log(`🚫 Ignorado (fora da lista de autorizados): ${isGroup ? 'grupo ' + sender + ' / ' : ''}${quemFala || '(sem remetente)'}`);
+          continue;
+        }
+      }
+
       // Detect audio messages (voice notes or audio files)
       const hasAudio = !!(msg.message?.audioMessage);
       // Detect image messages (photos sent by the user)
@@ -169,10 +184,8 @@ async function connectToWhatsApp() {
             canProcessImage = !groupSettingsImg.require_mention || isMentionedImg;
           }
         } else {
-          if (!isUserBlocked(senderJidImg)) {
-            const respondToAllImg = getSetting('respond_to_all_private') === 'true';
-            canProcessImage = respondToAllImg || isUserAllowed(senderJidImg);
-          }
+          // Ja' passou pela lista de autorizados acima.
+          canProcessImage = true;
         }
         if (canProcessImage) {
           console.log(`🖼️ [${isGroup ? 'Grupo' : 'Privado'}] ${senderName} (${sender}): [Imagem recebida, analisando...]`);
@@ -281,19 +294,8 @@ async function connectToWhatsApp() {
           continue;
         }
 
-        const respondToAll = getSetting('respond_to_all_private') === 'true';
-
-        if (respondToAll) {
-          shouldRespond = true;
-        } else {
-          // Only respond to allowed users — silently ignore everyone else
-          if (isUserAllowed(senderJid)) {
-            shouldRespond = true;
-          } else {
-            console.log(`🚫 Usuário não permitido: ${senderJid} (${senderName})`);
-            continue;
-          }
-        }
+        // Ja' passou pela lista de autorizados no topo do laco.
+        shouldRespond = true;
 
         // Handle commands
         if (text.startsWith('/ia ') || text.startsWith('/IA ')) {
