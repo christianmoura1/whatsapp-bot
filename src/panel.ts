@@ -46,6 +46,13 @@ app.use(cors({
 app.use(express.json());
 
 // Serve static files (local panel)
+app.use((req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.setHeader('Surrogate-Control', 'no-store');
+  next();
+});
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // ─── Remote API Token ───────────────────────────────────────────────
@@ -90,7 +97,7 @@ function authMiddleware(req: express.Request, res: express.Response, next: expre
     return res.status(401).json({ error: 'Não autorizado' });
   }
 
-  if (req.path === '/login') return next();
+  if (req.path === '/login' || req.path === '/api/login') return next();
 
   const authHeader = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   if (igual(authHeader, senhaDoPainel())) return next();
