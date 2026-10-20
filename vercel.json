@@ -1,0 +1,6 @@
+{
+"outputDirectory": ".",
+"rewrites": [
+{ "source": "/api/proxy", "destination": "/api/proxy" }
+]
+}
