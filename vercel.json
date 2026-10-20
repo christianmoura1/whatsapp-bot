@@ -1,10 +1,5 @@
 {
   "rewrites": [
     { "source": "/api/proxy", "destination": "/api/proxy" }
-  ],
-  "functions": {
-    "api/proxy.js": {
-      "runtime": "@vercel/node@3"
-    }
-  }
+  ]
 }
