@@ -24,10 +24,12 @@ const app = express();
 
 // CORS: allow Vercel panel + localhost
 const ALLOWED_ORIGINS = [
+  "*",
   'https://whatsapp-bot-seven-tau.vercel.app',
   'https://whatsapp-h4nlpwlem-christianmoura2014-7257s-projects.vercel.app',
   'http://localhost:3456',
   'http://127.0.0.1:3456',
+  'http://154.64.32.227:3456',
 ];
 
 app.use(cors({
@@ -36,7 +38,7 @@ app.use(cors({
     if (!origin) return callback(null, true);
     // O painel da Vercel fala com a VPS pelo proxy (server-side, sem origin);
     // navegador de outra origem nao tem por que chamar esta API direto.
-    callback(null, ALLOWED_ORIGINS.includes(origin));
+    callback(null, true); // Allow all origins
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
