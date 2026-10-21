@@ -320,7 +320,7 @@ function toast(msg, type = 'success') {
 
 async function doLogin() {
   const pw = document.getElementById('loginPassword').value;
-  const res = await api('POST', '/api/login', { password: pw });
+  const res = await api('POST', '/login', { password: pw });
   if (res.success) {
     guardarToken(res.token);
     document.getElementById('loginPassword').value = '';
