@@ -276,10 +276,13 @@ function isVercelHost() {
 function montarRequisicao(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
   if (token) opts.headers['Authorization'] = `Bearer ${token}`;
-  // SEMPRE usar acesso direto à VPS - bypassa o proxy Vercel problemático
-  const vpsUrl = 'http://154.64.32.227:3456';
+  if (isVercelHost()) {
+    opts.method = 'POST';
+    opts.body = JSON.stringify({ path: '/api' + path, method, body: body || null });
+    return { url: '/api/proxy', opts };
+  }
   if (body) opts.body = JSON.stringify(body);
-  return { url: vpsUrl + '/api' + path, opts };
+  return { url: '/api' + path, opts };
 }
 
 async function api(method, path, body) {
